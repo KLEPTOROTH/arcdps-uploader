@@ -72,7 +72,9 @@ int main() {
     for (int n = 0; n < 120; n++) {
         ImGui_ImplNull_NewFrame();
         ImGui::NewFrame();
-        mod_imgui(1);
+        // Alternate in-game and character-select frames: the window must
+        // draw on both, and charsel frames exercise the update notice path.
+        mod_imgui(n % 4 != 3);
         mod_options_windows(nullptr);
         ImGui::Render();
         ImGui_ImplNullRender_RenderDrawData(ImGui::GetDrawData());

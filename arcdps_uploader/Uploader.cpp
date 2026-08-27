@@ -147,7 +147,13 @@ Uploader::~Uploader() {
     upload_thread.join();
 }
 
-uintptr_t Uploader::imgui_tick() {
+uintptr_t Uploader::imgui_tick(uint32_t not_charsel_or_loading) {
+    // At character select / loading screens, surface a pending update the
+    // way arcdps surfaces its own update notes.
+    if (!not_charsel_or_loading) {
+        imgui_draw_update_notice();
+    }
+
 #ifdef STANDALONE
     if (1) {
 #else
@@ -224,6 +230,38 @@ uintptr_t Uploader::imgui_tick() {
     }
 
     return uintptr_t();
+}
+
+void Uploader::imgui_draw_update_notice() {
+    if (update_notice_dismissed) return;
+    auto us = Updater::get_state();
+    if (us.status != Updater::Status::STAGED &&
+        us.status != Updater::Status::AVAILABLE) {
+        return;
+    }
+
+    ImGui::SetNextWindowPos(ImVec2(40, 40), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Uploader Update", nullptr,
+                     ImGuiWindowFlags_AlwaysAutoResize |
+                         ImGuiWindowFlags_NoCollapse)) {
+        if (us.status == Updater::Status::STAGED) {
+            ImGui::TextColored(ImVec4(0.f, 1.f, 0.f, 1.f), "%s",
+                               us.message.c_str());
+            ImGui::TextUnformatted(
+                "The update was downloaded automatically and takes effect "
+                "the next time the game starts.");
+        } else {
+            ImGui::TextColored(ImVec4(1.f, 1.f, 0.f, 1.f), "%s",
+                               us.message.c_str());
+            ImGui::TextUnformatted(
+                "Auto-update is off or unavailable; grab it from the "
+                "GitHub releases page.");
+        }
+        if (ImGui::Button("Dismiss")) {
+            update_notice_dismissed = true;
+        }
+    }
+    ImGui::End();
 }
 
 static void open_url_in_browser(const std::string& url) {

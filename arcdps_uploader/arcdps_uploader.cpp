@@ -210,8 +210,7 @@ uintptr_t mod_combat(cbtevent* ev, ag* src, ag* dst, char* skillname,
 }
 
 uintptr_t mod_imgui(uint32_t not_charsel_or_loading) {
-    if (!not_charsel_or_loading) return 0;
-    return up->imgui_tick();
+    return up->imgui_tick(not_charsel_or_loading);
 }
 
 void mod_options_windows(char* windowname) {

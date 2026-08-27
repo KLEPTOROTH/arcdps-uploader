@@ -16,6 +16,10 @@ Grab the latest [release](https://github.com/KLEPTOROTH/arcdps-uploader/releases
 Use *Alt-Shift-U* to bring the uploader window up.
 
 ## Changelog
+**1.2.2**
+* The uploader window opens on the character select and loading screens again (1.1.0 regression)
+* A pending update now pops up a notice at the character select screen, the way arcdps surfaces its own updates (dismissable per session)
+
 **1.2.1**
 * "WM" button next to "View" in the log table opens the log's Wingman page (link is fetched and stored after each Wingman upload)
 

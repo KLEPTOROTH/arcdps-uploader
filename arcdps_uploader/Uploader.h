@@ -70,10 +70,13 @@ class Uploader
 	std::mutex ut_mutex;
 	std::condition_variable ut_cv;
 
+	bool update_notice_dismissed = false;
+
 	void imgui_draw_logs();
 	void imgui_draw_status();
 	void imgui_draw_options();
 	void imgui_draw_options_aleeva();
+	void imgui_draw_update_notice();
 	void create_log_table(Log& l);
 
 	void check_webhooks(int log_id);
@@ -98,7 +101,7 @@ public:
 	Uploader(fs::path data_path, std::optional<fs::path> custom_log_path);
 	~Uploader();
 
-	uintptr_t imgui_tick();
+	uintptr_t imgui_tick(uint32_t not_charsel_or_loading);
 	void imgui_window_checkbox();
 	
 	void start_async_refresh_log_list();

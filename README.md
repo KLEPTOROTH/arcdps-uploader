@@ -16,6 +16,14 @@ Grab the latest [release](https://github.com/KLEPTOROTH/arcdps-uploader/releases
 Use *Alt-Shift-U* to bring the uploader window up.
 
 ## Changelog
+**1.1.2**
+* Added missing encounter IDs to Discord webhook category routing — these encounters previously fell to UNKNOWN and were silently never posted:
+  * Raids: Greer, Decima, Ura (Wing 8 — Mount Balrior), Kela (Guardian's Glade, Visions of Eternity), Spirit Race (Wing 1 event)
+  * Fractals: Kanaxai (Silent Surf CM), Eparch (Lonely Tower CM), Whispering Shadow (Kinfall)
+  * Strikes: the third Captain Mai Trin encounter ID (was defined but missing from the routing table)
+* The `revtc` submodule is now vendored directly into the repo (no more `git submodule update --init` after cloning)
+* Smoke test now pins the encounter→category mapping
+
 **1.1.1**
 * "Copy & Format Selected" no longer copies only the date when the configured format string is empty — an empty `Msg_Format` now falls back to the default format (`@1 - \n*@2*\n\n`)
 * Fixed the format-string escape parser eating the character after a `\` that wasn't part of `\n`
@@ -55,4 +63,7 @@ If you have any doubts, refer to [Arenanet's policy on Third-Party Programs](htt
 ## Support
 Please open an issue and leave a detailed description of your problem, feature request, etc.
 
-*Thanks to nbarrios for writing the original uploader, Arc/Delta for writing and supporting Arcdps, and the Elite Insights team for their excellent parser*
+## Attribution
+This fork makes use of [revtc](https://github.com/datatobridge/revtc), an EVTC parsing library by **datatobridge** (the original author of this uploader), which is vendored directly into this repository under the `revtc/` directory (MIT licensed — see `revtc/LICENSE`). It provides the boss ID tables and encounter category routing used for Discord webhook filtering.
+
+*Thanks to nbarrios/datatobridge for writing the original uploader and revtc, Arc/Delta for writing and supporting Arcdps, and the Elite Insights team for their excellent parser*

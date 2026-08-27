@@ -1,22 +1,32 @@
 # Arcdps-Uploader
 This is an extension for Arcdps that automatically uploads EVTC combat logs *in-game*.
 
+> **Note:** This is a fork of [nbarrios/arcdps-uploader](https://github.com/nbarrios/arcdps-uploader) by the original author. Upstream builds (v1.0.4 and earlier) were compiled against imgui 1.80 and no longer load on current arcdps — they crash the game when the window opens. This fork ports the extension to imgui 1.92.7 (the version current arcdps builds against) so it loads natively again, and wires arcdps' allocator into imgui as the extension API requires.
+
 ![Image of the Uploader](https://i.imgur.com/BfcNAR2.png)
 * Easy access to recent logs, one-click to view on dps.reports
 * No network usage while you're in combat
 * Discord Webhook integration
 
-### CURRENT BUILDS MAY NO LONGER LOAD
-It may simply fail to display or even crash your game on startup. Consider [Plen Bot Log Uploader](https://github.com/Plenyx/PlenBotLogUploader) as an alternative as I have no ETA for a fix. I don't have much time to maintain this project (or play GW2 for that matter) but I will get it working again at some point. PRs welcome.
-
 ## Usage
-Grab the latest [release](https://github.com/datatobridge/arcdps-uploader/releases). Unzip and copy `d3d9_uploader.dll` to same directory as **Arcdps** (usually something like `C:\Program Files\Guild Wars 2\bin64`).
+Grab the latest [release](https://github.com/KLEPTOROTH/arcdps-uploader/releases). Copy `d3d9_uploader.dll` to the same directory as **Arcdps** (the folder containing arcdps' dll — for a default arcdps install that is `C:\Program Files\Guild Wars 2` or `bin64`).
 
 *If the extension fails to load, install the latest x64 ![Visual C++ redistributable](https://support.microsoft.com/en-us/help/2977003/the-latest-supported-visual-c-downloads)*
 
 Use *Alt-Shift-U* to bring the uploader window up.
 
 ## Changelog
+**1.1.1**
+* "Copy & Format Selected" no longer copies only the date when the configured format string is empty — an empty `Msg_Format` now falls back to the default format (`@1 - \n*@2*\n\n`)
+* Fixed the format-string escape parser eating the character after a `\` that wasn't part of `\n`
+
+**1.1.0**
+* Ported the bundled imgui from 1.80 to 1.92.7 (19270) so the extension loads natively on current arcdps instead of crashing through the legacy shim
+* Route imgui allocations through the allocator arcdps provides (`ImGui::SetAllocatorFunctions`) — required for a shared context; skipping it corrupts the game heap when the window opens
+* The imgui callback now receives `not_charsel_or_loading` and skips drawing during character select and loading screens
+* Added a headless smoke test that drives the real `get_init_addr` entrypoint, opens the window via the actual Alt+Shift+U path, draws 120 frames, and asserts allocator routing — runs in CI on every build
+* CI: moved off the retired `windows-2019` runner, artifacts uploaded on every build, releases on tags
+
 **1.0.1**
 * Added Aleeva integration
 * Contributed by @covertPZ: Additional user configuration for formatted log messages
@@ -45,4 +55,4 @@ If you have any doubts, refer to [Arenanet's policy on Third-Party Programs](htt
 ## Support
 Please open an issue and leave a detailed description of your problem, feature request, etc.
 
-*Thanks to Arc/Delta for writing and supporting Arcdps, and the Elite Insights team for their excellent parser*
+*Thanks to nbarrios for writing the original uploader, Arc/Delta for writing and supporting Arcdps, and the Elite Insights team for their excellent parser*

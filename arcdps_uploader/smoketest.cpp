@@ -19,6 +19,7 @@
 #include <filesystem>
 
 #include "Revtc.h"
+#include "Updater.h"
 #include "arcdps_uploader.h"
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_null.h"
@@ -121,6 +122,26 @@ int main() {
     }
     printf("encounter category routing OK: %zu bosses mapped\n",
            sizeof(cat_cases) / sizeof(cat_cases[0]));
+
+    // Updater version comparison (pure function, no network)
+    struct {
+        const char* remote;
+        const char* local;
+        bool newer;
+    } ver_cases[] = {
+        {"v1.2.1", "1.2.0", true},   {"1.2.0", "1.2.0", false},
+        {"v1.1.9", "1.2.0", false},  {"2.0.0", "1.9.9", true},
+        {"v1.10.0", "1.9.0", true},  {"1.2", "1.2.0", false},
+    };
+    for (const auto& c : ver_cases) {
+        if (Updater::is_newer(c.remote, c.local) != c.newer) {
+            printf("FAIL: is_newer(%s, %s) != %d\n", c.remote, c.local,
+                   (int)c.newer);
+            return 1;
+        }
+    }
+    printf("updater version comparison OK: %zu cases\n",
+           sizeof(ver_cases) / sizeof(ver_cases[0]));
 
     typedef uintptr_t (*ModReleaseFn)();
     ModReleaseFn release_fn = (ModReleaseFn)get_release_addr();

@@ -17,6 +17,8 @@ set(SOURCE
     arcdps_uploader/arc_logging.cpp
     arcdps_uploader/Aleeva.cpp
     arcdps_uploader/Uploader.cpp
+    arcdps_uploader/Updater.cpp
+    arcdps_uploader/Wingman.cpp
     arcdps_uploader/Settings.cpp
     arcdps_uploader/Log.cpp
     arcdps_uploader/imgui/imgui.cpp
@@ -36,6 +38,8 @@ set(HEADERS
     arcdps_uploader/arc_logging.h
     arcdps_uploader/Aleeva.h
     arcdps_uploader/Uploader.h
+    arcdps_uploader/Updater.h
+    arcdps_uploader/Wingman.h
     arcdps_uploader/Settings.h
     arcdps_uploader/Log.h
     arcdps_uploader/imgui/imgui.h

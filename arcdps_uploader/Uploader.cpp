@@ -6,6 +6,8 @@
 #include <thread>
 
 #include "Aleeva.h"
+#include "Updater.h"
+#include "Wingman.h"
 #include "imgui/imgui.h"
 #include "imgui/imgui_stdlib.h"
 #include "loguru.hpp"
@@ -181,6 +183,19 @@ uintptr_t Uploader::imgui_tick() {
         if (in_combat) {
             ImGui::TextColored(ImVec4(1.f, 0.f, 0.f, 1.f),
                                "In Combat - Uploads Disabled");
+        }
+
+        {
+            auto us = Updater::get_state();
+            if (us.status == Updater::Status::STAGED) {
+                ImGui::TextColored(ImVec4(0.f, 1.f, 0.f, 1.f), "%s",
+                                   us.message.c_str());
+            } else if (us.status == Updater::Status::AVAILABLE) {
+                ImGui::TextColored(ImVec4(1.f, 1.f, 0.f, 1.f), "%s",
+                                   us.message.c_str());
+            } else if (us.status == Updater::Status::ERR) {
+                ImGui::TextDisabled("%s", us.message.c_str());
+            }
         }
 
         ImGui::PopStyleColor();
@@ -691,7 +706,45 @@ void Uploader::imgui_draw_options() {
             ImGui::TreePop();
         }
 
+        if (ImGui::TreeNode("Wingman")) {
+            ImGui::Checkbox("Upload to Wingman", &settings.wingman_enabled);
+            if (ImGui::IsItemHovered()) {
+                ImGui::BeginTooltip();
+                ImGui::Text(
+                    "Also upload each log to gw2wingman.nevermindcreations.de "
+                    "after the dps.report upload. WvW logs are skipped "
+                    "(Wingman does not accept them).");
+                ImGui::EndTooltip();
+            }
+
+            if (settings.wingman_enabled) {
+                ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x -
+                                     ImGui::CalcTextSize("Account name").x - 5);
+                ImGui::InputText("Account name", &settings.wingman_account);
+                ImGui::PopItemWidth();
+                if (ImGui::IsItemHovered()) {
+                    ImGui::BeginTooltip();
+                    ImGui::Text(
+                        "Your GW2 account name (Name.1234) so Wingman can "
+                        "attribute the logs.");
+                    ImGui::EndTooltip();
+                }
+            }
+
+            ImGui::TreePop();
+        }
+
         if (ImGui::TreeNode("Other")) {
+            ImGui::Checkbox("Auto-update on launch", &settings.auto_update);
+            if (ImGui::IsItemHovered()) {
+                ImGui::BeginTooltip();
+                ImGui::Text(
+                    "Check GitHub for a new uploader version at startup. "
+                    "Updates download in the background and load on the next "
+                    "game start.");
+                ImGui::EndTooltip();
+            }
+
             ImGui::Checkbox("Enable detailed WvW reports",
                             &settings.wvw_detailed_enabled);
             if (ImGui::IsItemHovered()) {
@@ -1331,6 +1384,7 @@ void Uploader::upload_thread_loop() {
                     check_webhooks(log->id);
                     check_gw2bot(log->id);
                     check_aleeva(log->id);
+                    check_wingman(*log);
                 };
             } catch (std::system_error e) {
                 LOG_F(ERROR, "Failed to update log: %s", e.what());
@@ -1339,6 +1393,21 @@ void Uploader::upload_thread_loop() {
             queue_status_message(status);
         }
     }
+}
+
+void Uploader::check_wingman(const Log& log) {
+    if (!settings.wingman_enabled) return;
+    if (log.boss_id == 1) return;  // Wingman does not accept WvW logs
+    std::error_code ec;
+    auto size = fs::file_size(log.path, ec);
+    if (ec) {
+        queue_status_message("Wingman: log file missing for " + log.filename);
+        return;
+    }
+    auto [ok, msg] = Wingman::upload_evtc(
+        log.path.string(), (long long)size, log.boss_id,
+        settings.wingman_account);
+    queue_status_message("Wingman: " + log.boss_name + " " + msg);
 }
 
 void Uploader::queue_status_message(const std::string& msg, int log_id) {

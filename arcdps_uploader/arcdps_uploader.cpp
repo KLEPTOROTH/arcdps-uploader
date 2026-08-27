@@ -9,6 +9,7 @@
 #include <iomanip>
 
 #include "SimpleIni.h"
+#include "Updater.h"
 #include "Uploader.h"
 #include "imgui/imgui.h"
 #include "loguru.hpp"
@@ -126,12 +127,17 @@ arcdps_exports* mod_init() {
     up->start_async_refresh_log_list();
     up->start_upload_thread();
 
+    // Self-update (arcdps-style: stage in our config dir, swap via rename,
+    // new version loads next game start)
+    Updater::cleanup_old();
+    Updater::begin_check(UPLOADER_VERSION, up->settings.auto_update);
+
     /* for arcdps */
     exports.size = sizeof(arcdps_exports);
     exports.sig = 0x92485179;
     exports.imguivers = IMGUI_VERSION_NUM;
     exports.out_name = "uploader";
-    exports.out_build = "1.1.2";
+    exports.out_build = UPLOADER_VERSION;
     exports.wnd_nofilter = mod_wnd;
     exports.combat = mod_combat;
     exports.imgui = mod_imgui;
@@ -141,6 +147,7 @@ arcdps_exports* mod_init() {
 
 /* release mod -- return ignored */
 uintptr_t mod_release() {
+    Updater::shutdown();
     delete up;
     return 0;
 }

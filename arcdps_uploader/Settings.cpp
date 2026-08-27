@@ -21,6 +21,12 @@ void Settings::load() {
             msg_format = DEFAULT_MSG_FORMAT;
         }
         recent_minutes = ini.GetLongValue(INI_SECTION_SETTINGS, INI_RECENT_MINUTES, 150);
+        auto_update =
+            ini.GetBoolValue(INI_SECTION_SETTINGS, INI_AUTO_UPDATE, true);
+        wingman_enabled =
+            ini.GetBoolValue(INI_SECTION_SETTINGS, INI_WINGMAN_ENABLED, false);
+        wingman_account =
+            ini.GetValue(INI_SECTION_SETTINGS, INI_WINGMAN_ACCOUNT, "");
         gw2bot_enabled =
             ini.GetBoolValue(INI_SECTION_SETTINGS, INI_GW2BOT_ENABLED, false);
 
@@ -60,6 +66,11 @@ void Settings::save() {
                      wvw_detailed_enabled);
     ini.SetValue(INI_SECTION_SETTINGS, INI_MSG_FORMAT, msg_format.c_str());
     ini.SetLongValue(INI_SECTION_SETTINGS, INI_RECENT_MINUTES, recent_minutes);
+    ini.SetBoolValue(INI_SECTION_SETTINGS, INI_AUTO_UPDATE, auto_update);
+    ini.SetBoolValue(INI_SECTION_SETTINGS, INI_WINGMAN_ENABLED,
+                     wingman_enabled);
+    ini.SetValue(INI_SECTION_SETTINGS, INI_WINGMAN_ACCOUNT,
+                 wingman_account.c_str());
     ini.SetBoolValue(INI_SECTION_SETTINGS, INI_GW2BOT_ENABLED, gw2bot_enabled);
     ini.SetValue(INI_SECTION_SETTINGS, INI_GW2BOT_KEY, gw2bot_key.c_str());
     ini.SetBoolValue(INI_SECTION_SETTINGS, INI_GW2BOT_SUCCESS_ONLY,

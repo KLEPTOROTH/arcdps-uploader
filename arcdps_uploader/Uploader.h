@@ -48,8 +48,6 @@ struct Webhook
 
 class Uploader
 {
-	Settings settings;
-
 	fs::path log_path;
 	std::vector<Log> logs;
 	std::future<decltype(logs)> ft_file_list;
@@ -81,6 +79,7 @@ class Uploader
 	void check_webhooks(int log_id);
 	void check_gw2bot(int log_id);
 	void check_aleeva(int log_id);
+	void check_wingman(const Log& log);
 
 	void upload_thread_loop();
 	void add_pending_upload_logs(std::vector<int>& queue);
@@ -91,6 +90,8 @@ class Uploader
 
 	std::string format_msg(Log log);
 public:
+	Settings settings;
+
 	bool is_open;
 	bool in_combat;
 

@@ -5,7 +5,7 @@
         {
             "name": "curl",
             "features": [
-                "schannel",
+                "ssl",
                 "brotli"
             ]
         },

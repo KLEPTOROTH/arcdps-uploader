@@ -329,6 +329,7 @@ void Uploader::imgui_draw_logs() {
     ImGui::NextColumn();
     ImGui::Separator();
     static bool selected[75]{false};
+    static int select_anchor = -1;
     for (int i = 0; i < logs.size(); ++i) {
         Log& s = logs.at(i);
         std::string display;
@@ -348,8 +349,25 @@ void Uploader::imgui_draw_logs() {
         ImGui::PushStyleColor(ImGuiCol_Text, col);
         ImGui::PushID(s.human_time.c_str());
         ImGui::SetNextItemAllowOverlap();
-        ImGui::Selectable(display.c_str(), &selected[i],
-                          ImGuiSelectableFlags_SpanAllColumns);
+        if (ImGui::Selectable(display.c_str(), &selected[i],
+                              ImGuiSelectableFlags_SpanAllColumns)) {
+            if (ImGui::GetIO().KeyShift && select_anchor >= 0 &&
+                select_anchor < (int)logs.size()) {
+                // Shift+click: select the whole range from the anchor,
+                // skipping rows hidden by the wipe filter. The anchor is
+                // kept so repeated shift-clicks extend from the same spot.
+                int lo = (std::min)(select_anchor, i);
+                int hi = (std::max)(select_anchor, i);
+                for (int k = lo; k <= hi && k < 75; k++) {
+                    if (success_only && !logs.at(k).success) continue;
+                    selected[k] = true;
+                }
+            } else {
+                // Plain click toggles one row (non-contiguous selection)
+                // and becomes the new range anchor.
+                select_anchor = i;
+            }
+        }
         ImGui::PopID();
         ImGui::PopStyleColor();
         ImGui::NextColumn();
@@ -430,10 +448,20 @@ void Uploader::imgui_draw_logs() {
 
         std::string msg(buf);
 
-        std::chrono::system_clock::time_point current =
-            std::chrono::system_clock::now();
-        std::chrono::system_clock::time_point past =
-            current - std::chrono::minutes(settings.recent_minutes);
+        std::chrono::system_clock::time_point past;
+        if (settings.recent_clears_today) {
+            // Clears from today: everything since local midnight.
+            std::tm midnight = *local;
+            midnight.tm_hour = 0;
+            midnight.tm_min = 0;
+            midnight.tm_sec = 0;
+            midnight.tm_isdst = -1;
+            past = std::chrono::system_clock::from_time_t(
+                std::mktime(&midnight));
+        } else {
+            past = std::chrono::system_clock::now() -
+                   std::chrono::minutes(settings.recent_minutes);
+        }
         for (int i = 0; i < logs.size(); ++i) {
             const Log& s = logs.at(i);
             if (s.uploaded && s.success) {
@@ -443,6 +471,14 @@ void Uploader::imgui_draw_logs() {
             }
         }
         ImGui::SetClipboardText(msg.c_str());
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(
+            settings.recent_clears_today
+                ? "Copies all of today's clears (configurable under Other)"
+                : "Copies clears from the configured window (see Other)");
+        ImGui::EndTooltip();
     }
 
 #ifdef STANDALONE
@@ -849,9 +885,21 @@ void Uploader::imgui_draw_options() {
                 ImGui::EndTooltip();
             }
 
-            ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.25f);
-            ImGui::InputInt("# of minutes back for recent clears", &settings.recent_minutes);
-            ImGui::PopItemWidth();
+            ImGui::Checkbox("Recent clears: today only",
+                            &settings.recent_clears_today);
+            if (ImGui::IsItemHovered()) {
+                ImGui::BeginTooltip();
+                ImGui::Text(
+                    "\"Copy & Format Recent Clears\" copies clears since "
+                    "midnight. Uncheck to use a minutes-back window instead.");
+                ImGui::EndTooltip();
+            }
+            if (!settings.recent_clears_today) {
+                ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.25f);
+                ImGui::InputInt("# of minutes back for recent clears",
+                                &settings.recent_minutes);
+                ImGui::PopItemWidth();
+            }
 
             ImGui::TreePop();
         }

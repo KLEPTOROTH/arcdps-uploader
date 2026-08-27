@@ -21,6 +21,8 @@ void Settings::load() {
             msg_format = DEFAULT_MSG_FORMAT;
         }
         recent_minutes = ini.GetLongValue(INI_SECTION_SETTINGS, INI_RECENT_MINUTES, 150);
+        recent_clears_today = ini.GetBoolValue(
+            INI_SECTION_SETTINGS, INI_RECENT_CLEARS_TODAY, true);
         auto_update =
             ini.GetBoolValue(INI_SECTION_SETTINGS, INI_AUTO_UPDATE, true);
         wingman_enabled =
@@ -66,6 +68,8 @@ void Settings::save() {
                      wvw_detailed_enabled);
     ini.SetValue(INI_SECTION_SETTINGS, INI_MSG_FORMAT, msg_format.c_str());
     ini.SetLongValue(INI_SECTION_SETTINGS, INI_RECENT_MINUTES, recent_minutes);
+    ini.SetBoolValue(INI_SECTION_SETTINGS, INI_RECENT_CLEARS_TODAY,
+                     recent_clears_today);
     ini.SetBoolValue(INI_SECTION_SETTINGS, INI_AUTO_UPDATE, auto_update);
     ini.SetBoolValue(INI_SECTION_SETTINGS, INI_WINGMAN_ENABLED,
                      wingman_enabled);

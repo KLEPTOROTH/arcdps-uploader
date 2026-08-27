@@ -32,6 +32,7 @@ struct Settings
 	bool wvw_detailed_enabled;
 	std::string msg_format;
 	int recent_minutes;
+	bool recent_clears_today;
 	bool auto_update;
 	bool wingman_enabled;
 	std::string wingman_account;
@@ -53,6 +54,7 @@ inline constexpr char* INI_SECTION_SETTINGS = "Settings";
 inline constexpr char* INI_WVW_DETAILED_SETTING = "WvW_Detailed";
 inline constexpr char* INI_MSG_FORMAT = "Msg_Format";
 inline constexpr char* INI_RECENT_MINUTES = "Recent_Minutes";
+inline constexpr char* INI_RECENT_CLEARS_TODAY = "Recent_Clears_Today";
 inline constexpr char* INI_AUTO_UPDATE = "Auto_Update";
 inline constexpr char* INI_WINGMAN_ENABLED = "Wingman_Enabled";
 inline constexpr char* INI_WINGMAN_ACCOUNT = "Wingman_Account";

@@ -16,6 +16,10 @@ Grab the latest [release](https://github.com/KLEPTOROTH/arcdps-uploader/releases
 Use *Alt-Shift-U* to bring the uploader window up.
 
 ## Changelog
+**1.2.4**
+* Shift+click selects the whole range of fights between the last clicked fight and the shift-clicked one; plain clicks still toggle fights individually
+* "Copy & Format Recent Clears" now copies today's clears by default (since local midnight); the previous minutes-back window is available via "Recent clears: today only" under Options → Other
+
 **1.2.3**
 * Wingman links resolve correctly now (the page slug is nested in the API response; it was read from the wrong place, so WM buttons never appeared)
 * A log Wingman already has ("already exists") now counts as uploaded and gets its page link fetched

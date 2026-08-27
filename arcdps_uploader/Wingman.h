@@ -13,4 +13,13 @@ std::pair<bool, std::string> upload_evtc(const std::string& file_path,
                                          long long filesize, int boss_id,
                                          const std::string& account);
 
+// Full permalink for a Wingman log page slug.
+std::string log_url(const std::string& slug);
+
+// Ask Wingman for the published page of an uploaded log
+// (checkUploadSuccessfulWithLog). Returns the full permalink, or an empty
+// string if the log is not visible (yet).
+std::string fetch_log_link(const std::string& filename, long long filesize,
+                           int boss_id, const std::string& account);
+
 }  // namespace Wingman

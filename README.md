@@ -16,6 +16,9 @@ Grab the latest [release](https://github.com/KLEPTOROTH/arcdps-uploader/releases
 Use *Alt-Shift-U* to bring the uploader window up.
 
 ## Changelog
+**1.2.1**
+* "WM" button next to "View" in the log table opens the log's Wingman page (link is fetched and stored after each Wingman upload)
+
 **1.2.0**
 * Self-updater: checks GitHub releases at startup (arcdps-style — downloads into `addons\uploader\`, swaps via rename, new version loads on the next game start; previous version kept as `d3d9_uploader.dll_prev` for rollback). Toggle with "Auto-update on launch" under Options → Other.
 * Wingman support: optionally upload every log to [gw2wingman](https://gw2wingman.nevermindcreations.de) after the dps.report upload (Options → Wingman; set your account name; WvW logs are skipped as Wingman does not accept them).

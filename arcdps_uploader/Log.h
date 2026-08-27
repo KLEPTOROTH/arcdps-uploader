@@ -25,6 +25,7 @@ struct Log {
 	std::optional<nlohmann::json> players;
 	bool json_available;
 	bool success;
+	std::string wingman_link;
 
 	inline bool operator==(const Log&rhs) {
 		return time == rhs.time && filename == rhs.filename;

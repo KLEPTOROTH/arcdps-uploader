@@ -1,5 +1,8 @@
 #include "Wingman.h"
 
+#include <chrono>
+#include <thread>
+
 #include <cpr/cpr.h>
 #include <nlohmann/json.hpp>
 
@@ -9,8 +12,44 @@ using json = nlohmann::json;
 
 namespace Wingman {
 
+static const char* WINGMAN_BASE = "https://gw2wingman.nevermindcreations.de";
 static const char* UPLOAD_URL =
     "https://gw2wingman.nevermindcreations.de/uploadEVTC";
+
+std::string log_url(const std::string& slug) {
+    return std::string(WINGMAN_BASE) + "/log/" + slug;
+}
+
+std::string fetch_log_link(const std::string& filename, long long filesize,
+                           int boss_id, const std::string& account) {
+    // Wingman indexes the log shortly after uploadEVTC returns; retry a
+    // couple of times before giving up.
+    for (int attempt = 0; attempt < 3; attempt++) {
+        if (attempt > 0) {
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+        }
+        auto resp = cpr::Post(
+            cpr::Url{std::string(WINGMAN_BASE) + "/checkUploadSuccessfulWithLog"},
+            cpr::Payload{{"file", filename},
+                         {"filesize", std::to_string(filesize)},
+                         {"bossID", std::to_string(boss_id)},
+                         {"account", account}},
+            cpr::Header{{"User-Agent", "arcdps-uploader"}},
+            cpr::Timeout{20000});
+        if (resp.status_code != 200) continue;
+        try {
+            json j = json::parse(resp.text);
+            std::string slug = j.value("html", "");
+            if (!slug.empty()) {
+                return log_url(slug);
+            }
+        } catch (const json::exception&) {
+            // "False" or other non-json body: not indexed yet
+        }
+    }
+    LOG_F(INFO, "Wingman: no log page yet for %s", filename.c_str());
+    return "";
+}
 
 std::pair<bool, std::string> upload_evtc(const std::string& file_path,
                                          long long filesize, int boss_id,

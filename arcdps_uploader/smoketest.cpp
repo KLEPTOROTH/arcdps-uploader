@@ -20,6 +20,7 @@
 
 #include "Revtc.h"
 #include "Updater.h"
+#include "Wingman.h"
 #include "arcdps_uploader.h"
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_null.h"
@@ -142,6 +143,13 @@ int main() {
     }
     printf("updater version comparison OK: %zu cases\n",
            sizeof(ver_cases) / sizeof(ver_cases[0]));
+
+    if (Wingman::log_url("abc123_boss") !=
+        "https://gw2wingman.nevermindcreations.de/log/abc123_boss") {
+        printf("FAIL: Wingman::log_url\n");
+        return 1;
+    }
+    printf("wingman log url OK\n");
 
     typedef uintptr_t (*ModReleaseFn)();
     ModReleaseFn release_fn = (ModReleaseFn)get_release_addr();

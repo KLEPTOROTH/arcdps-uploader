@@ -32,7 +32,8 @@ inline auto initStorage(const std::string& path) {
                    make_column("boss_name", &Log::boss_name),
                    make_column("players_json", &Log::players_json),
                    make_column("json_available", &Log::json_available),
-                   make_column("success", &Log::success)),
+                   make_column("success", &Log::success),
+                   make_column("wingman_link", &Log::wingman_link)),
         make_table(
             "webhooks",
             make_column("id", &Webhook::id, autoincrement(), primary_key()),
@@ -225,6 +226,16 @@ uintptr_t Uploader::imgui_tick() {
     return uintptr_t();
 }
 
+static void open_url_in_browser(const std::string& url) {
+    if (url.empty()) return;
+    int sz =
+        MultiByteToWideChar(CP_UTF8, 0, url.c_str(), (int)url.size(), 0, 0);
+    std::wstring wstr(sz, 0);
+    MultiByteToWideChar(CP_UTF8, 0, url.c_str(), (int)url.size(), &wstr[0],
+                        sz);
+    ShellExecute(0, 0, wstr.c_str(), 0, 0, SW_SHOW);
+}
+
 void Uploader::imgui_draw_logs() {
     static bool success_only = false;
 
@@ -243,7 +254,7 @@ void Uploader::imgui_draw_logs() {
     ImGui::BeginChild("List", log_size, ImGuiChildFlags_Borders, ImGuiWindowFlags_NoScrollbar);
 
     ImGui::Columns(3, "mycolumns");
-    float last_col = log_size.x - ImGui::CalcTextSize("View").x * 1.9f;
+    float last_col = log_size.x - ImGui::CalcTextSize("View WM").x * 1.9f;
     ImGui::SetColumnOffset(0, 0);
     ImGui::SetColumnOffset(
         1, last_col - ImGui::CalcTextSize("00:00PM (Mon Jan 00)").x * 1.1f);
@@ -285,14 +296,22 @@ void Uploader::imgui_draw_logs() {
         if (s.uploaded) {
             ImGui::PushID(s.filename.c_str());
             if (ImGui::SmallButton("View")) {
-                if (!s.permalink.empty()) {
-                    int sz =
-                        MultiByteToWideChar(CP_UTF8, 0, s.permalink.c_str(),
-                                            (int)s.permalink.size(), 0, 0);
-                    std::wstring wstr(sz, 0);
-                    MultiByteToWideChar(CP_UTF8, 0, s.permalink.c_str(),
-                                        (int)s.permalink.size(), &wstr[0], sz);
-                    ShellExecute(0, 0, wstr.c_str(), 0, 0, SW_SHOW);
+                open_url_in_browser(s.permalink);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::BeginTooltip();
+                ImGui::TextUnformatted("Open on dps.report");
+                ImGui::EndTooltip();
+            }
+            if (!s.wingman_link.empty()) {
+                ImGui::SameLine();
+                if (ImGui::SmallButton("WM")) {
+                    open_url_in_browser(s.wingman_link);
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::BeginTooltip();
+                    ImGui::TextUnformatted("Open on Wingman");
+                    ImGui::EndTooltip();
                 }
             }
             ImGui::PopID();
@@ -1395,7 +1414,7 @@ void Uploader::upload_thread_loop() {
     }
 }
 
-void Uploader::check_wingman(const Log& log) {
+void Uploader::check_wingman(Log& log) {
     if (!settings.wingman_enabled) return;
     if (log.boss_id == 1) return;  // Wingman does not accept WvW logs
     std::error_code ec;
@@ -1407,6 +1426,18 @@ void Uploader::check_wingman(const Log& log) {
     auto [ok, msg] = Wingman::upload_evtc(
         log.path.string(), (long long)size, log.boss_id,
         settings.wingman_account);
+    if (ok) {
+        log.wingman_link = Wingman::fetch_log_link(
+            log.filename, (long long)size, log.boss_id,
+            settings.wingman_account);
+        if (!log.wingman_link.empty()) {
+            try {
+                storage->update(log);
+            } catch (std::system_error& e) {
+                LOG_F(ERROR, "Failed to store wingman link: %s", e.what());
+            }
+        }
+    }
     queue_status_message("Wingman: " + log.boss_name + " " + msg);
 }
 

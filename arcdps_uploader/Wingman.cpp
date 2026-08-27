@@ -22,12 +22,12 @@ std::string log_url(const std::string& slug) {
 
 std::string fetch_log_link(const std::string& filename, long long filesize,
                            int boss_id, const std::string& account) {
-    // Wingman indexes the log shortly after uploadEVTC returns; retry a
-    // couple of times before giving up.
-    for (int attempt = 0; attempt < 3; attempt++) {
-        if (attempt > 0) {
-            std::this_thread::sleep_for(std::chrono::seconds(2));
-        }
+    // `filename` must be the name Wingman knows the upload by: the actual
+    // file name INCLUDING extension (the multipart upload sends the
+    // basename of the evtc). Wingman indexes asynchronously and can take
+    // a while, so poll patiently before giving up.
+    for (int attempt = 0; attempt < 6; attempt++) {
+        std::this_thread::sleep_for(std::chrono::seconds(attempt == 0 ? 5 : 10));
         auto resp = cpr::Post(
             cpr::Url{std::string(WINGMAN_BASE) + "/checkUploadSuccessfulWithLog"},
             cpr::Payload{{"file", filename},

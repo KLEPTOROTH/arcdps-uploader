@@ -64,6 +64,30 @@ Uploader::Uploader(fs::path data_path, std::optional<fs::path> custom_log_path)
     // Sqlite Database
     fs::path db_path = data_path / "uploader.db";
     LOG_F(INFO, "DB Path: %s", db_path.string().c_str());
+
+    // Schema changes must never go through sqlite_orm's sync_schema
+    // rebuild: it drops and recreates tables when it cannot ALTER,
+    // destroying upload history (v1.2.1 wiped the logs table this way).
+    // Back the db up and add new columns in place first, so sync_schema
+    // sees a matching schema and leaves the data alone.
+    if (fs::exists(db_path)) {
+        std::error_code ec;
+        fs::copy_file(db_path, data_path / "uploader.db.bak",
+                      fs::copy_options::overwrite_existing, ec);
+        if (ec) {
+            LOG_F(WARNING, "Failed to back up db: %s", ec.message().c_str());
+        }
+        sqlite3* raw = nullptr;
+        if (sqlite3_open(db_path.string().c_str(), &raw) == SQLITE_OK) {
+            // No-op (harmless error) when the column already exists.
+            sqlite3_exec(raw,
+                         "ALTER TABLE logs ADD COLUMN wingman_link TEXT NOT "
+                         "NULL DEFAULT ''",
+                         nullptr, nullptr, nullptr);
+            sqlite3_close(raw);
+        }
+    }
+
     storage = std::make_unique<Storage>(initStorage(db_path.string()));
 
     storage->sync_schema(true);
@@ -1465,8 +1489,10 @@ void Uploader::check_wingman(Log& log) {
         log.path.string(), (long long)size, log.boss_id,
         settings.wingman_account);
     if (ok) {
+        // Wingman knows the upload by the evtc's actual file name
+        // (with extension), not our extension-less display name.
         log.wingman_link = Wingman::fetch_log_link(
-            log.filename, (long long)size, log.boss_id,
+            log.path.filename().string(), (long long)size, log.boss_id,
             settings.wingman_account);
         if (!log.wingman_link.empty()) {
             try {

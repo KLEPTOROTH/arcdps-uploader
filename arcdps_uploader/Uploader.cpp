@@ -225,7 +225,7 @@ void Uploader::imgui_draw_logs() {
     }
     ImGui::PopStyleVar();
 
-    ImGui::BeginChild("List", log_size, true, ImGuiWindowFlags_NoScrollbar);
+    ImGui::BeginChild("List", log_size, ImGuiChildFlags_Borders, ImGuiWindowFlags_NoScrollbar);
 
     ImGui::Columns(3, "mycolumns");
     float last_col = log_size.x - ImGui::CalcTextSize("View").x * 1.9f;
@@ -259,11 +259,11 @@ void Uploader::imgui_draw_logs() {
 
         ImGui::PushStyleColor(ImGuiCol_Text, col);
         ImGui::PushID(s.human_time.c_str());
+        ImGui::SetNextItemAllowOverlap();
         ImGui::Selectable(display.c_str(), &selected[i],
                           ImGuiSelectableFlags_SpanAllColumns);
         ImGui::PopID();
         ImGui::PopStyleColor();
-        ImGui::SetItemAllowOverlap();
         ImGui::NextColumn();
         ImGui::Text(s.human_time.c_str());
         ImGui::NextColumn();
@@ -366,7 +366,7 @@ void Uploader::imgui_draw_logs() {
 
 void Uploader::imgui_draw_status() {
     ImGui::TextUnformatted("Status");
-    ImGui::BeginChild("Status Messages", ImVec2(450, 150), true);
+    ImGui::BeginChild("Status Messages", ImVec2(450, 150), ImGuiChildFlags_Borders);
 
     for (const auto& status : status_messages) {
         ImGui::Text(status.msg.c_str());
@@ -481,9 +481,9 @@ void Uploader::imgui_draw_options() {
             for (auto& wh : webhooks) {
                 ImGui::BeginChild(
                     wh.name.c_str(),
-                    ImVec2(ImGui::GetContentRegionAvailWidth(), 148), true);
+                    ImVec2(ImGui::GetContentRegionAvail().x, 148), ImGuiChildFlags_Borders);
 
-                ImGui::PushItemWidth(ImGui::GetContentRegionAvailWidth() -
+                ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x -
                                      ImGui::CalcTextSize("Filter").x - 1);
                 ImGui::InputText("Name", wh.name_buf, 64);
                 ImGui::PopItemWidth();
@@ -494,7 +494,7 @@ void Uploader::imgui_draw_options() {
                     ImGui::EndTooltip();
                 }
 
-                ImGui::PushItemWidth(ImGui::GetContentRegionAvailWidth() -
+                ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x -
                                      ImGui::CalcTextSize("Filter").x - 1);
                 ImGui::InputText("URL", wh.url_buf, 192);
                 ImGui::PopItemWidth();
@@ -543,7 +543,7 @@ void Uploader::imgui_draw_options() {
                     ImGui::EndTooltip();
                 }
 
-                ImGui::PushItemWidth(ImGui::GetContentRegionAvailWidth() -
+                ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x -
                                      ImGui::CalcTextSize("Filter").x - 1);
                 ImGui::InputText("Filter", wh.filter_buf, 256);
                 ImGui::PopItemWidth();
@@ -558,7 +558,7 @@ void Uploader::imgui_draw_options() {
                     ImGui::EndTooltip();
                 }
 
-                ImGui::PushItemWidth(ImGui::GetContentRegionAvailWidth() *
+                ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x *
                                      0.25f);
                 ImGui::InputInt("Min", &wh.filter_min, 1, 2);
                 ImGui::PopItemWidth();
@@ -667,7 +667,7 @@ void Uploader::imgui_draw_options() {
             }
 
             if (settings.gw2bot_enabled) {
-                ImGui::PushItemWidth(ImGui::GetContentRegionAvailWidth() -
+                ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x -
                                      ImGui::CalcTextSize("EVTC Api Key").x - 5);
                 ImGui::InputText("EVTC Api Key", &settings.gw2bot_key);
                 ImGui::PopItemWidth();
@@ -702,7 +702,7 @@ void Uploader::imgui_draw_options() {
                 ImGui::EndTooltip();
             }
 
-            ImGui::PushItemWidth(ImGui::GetContentRegionAvailWidth() -
+            ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x -
                 ImGui::CalcTextSize("Formatted log output").x - 5);
             ImGui::InputText("Formatted log string", &settings.msg_format);
             ImGui::PopItemWidth();
@@ -715,7 +715,7 @@ void Uploader::imgui_draw_options() {
                 ImGui::EndTooltip();
             }
 
-            ImGui::PushItemWidth(ImGui::GetContentRegionAvailWidth() * 0.25f);
+            ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.25f);
             ImGui::InputInt("# of minutes back for recent clears", &settings.recent_minutes);
             ImGui::PopItemWidth();
 
@@ -736,7 +736,7 @@ void Uploader::imgui_draw_options_aleeva() {
         if (settings.aleeva.enabled) {
             if (!settings.aleeva.authorised) {
                 const char* access_title = "Access Code";
-                ImGui::PushItemWidth(ImGui::GetContentRegionAvailWidth() -
+                ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x -
                                      ImGui::CalcTextSize(access_title).x - 5);
                 ImGui::InputText(access_title, &settings.aleeva.access_code);
                 ImGui::PopItemWidth();
@@ -885,7 +885,7 @@ void Uploader::create_log_table(Log& l) {
         ImGui::Text("%s (%s)", l.encounter_name.c_str(),
         seconds_to_string(l.parsed.encounter_duration).c_str());
         ImGui::Separator(); ImGui::Spacing(); ImGui::BeginChild("DPS Table",
-        size, false, ImGuiWindowFlags_NoScrollbar);
+        size, ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
 
         ImGui::Columns(10);
         ImGui::SetColumnOffset(0, 0); //Sub

@@ -124,7 +124,7 @@ arcdps_exports* mod_init() {
     exports.sig = 0x92485179;
     exports.imguivers = IMGUI_VERSION_NUM;
     exports.out_name = "uploader";
-    exports.out_build = "1.0.4";
+    exports.out_build = "1.1.0";
     exports.wnd_nofilter = mod_wnd;
     exports.combat = mod_combat;
     exports.imgui = mod_imgui;
@@ -195,7 +195,10 @@ uintptr_t mod_combat(cbtevent* ev, ag* src, ag* dst, char* skillname,
     return uintptr_t();
 }
 
-uintptr_t mod_imgui() { return up->imgui_tick(); }
+uintptr_t mod_imgui(uint32_t not_charsel_or_loading) {
+    if (!not_charsel_or_loading) return 0;
+    return up->imgui_tick();
+}
 
 void mod_options_windows(char* windowname) {
 	if (!windowname) {

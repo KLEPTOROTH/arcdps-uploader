@@ -129,6 +129,30 @@ target_link_libraries(uploader_smoketest PUBLIC
     cpr::cpr
 )
 
+add_executable(uploader_livetest
+    arcdps_uploader/livetest.cpp
+    arcdps_uploader/imgui/imgui_impl_null.cpp
+    arcdps_uploader/imgui/imgui_impl_null.h
+    ${SOURCE}
+    ${HEADERS}
+)
+
+set_property(TARGET uploader_livetest PROPERTY
+  MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+target_compile_definitions(uploader_livetest PRIVATE
+    UNICODE
+    _UNICODE
+    _CRT_SECURE_NO_WARNINGS
+    CURL_STATICLIB
+)
+target_compile_options(uploader_livetest PUBLIC "/Zc:__cplusplus")
+
+target_link_libraries(uploader_livetest PUBLIC
+    CURL::libcurl
+    cpr::cpr
+)
+
 if(GW2_DIR)
     add_custom_command(TARGET d3d9_uploader POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:d3d9_uploader> ${GW2_DIR}/bin64/$<TARGET_FILE_NAME:d3d9_uploader>

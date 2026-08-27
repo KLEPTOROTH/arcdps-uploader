@@ -3,7 +3,7 @@
 #include "arcdps_defs.h"
 #include "imgui/imgui.h"
 
-#define UPLOADER_VERSION "1.2.2"
+#define UPLOADER_VERSION "1.2.3"
 
 /* proto/globals */
 extern char* arcvers;

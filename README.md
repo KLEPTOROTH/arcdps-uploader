@@ -16,6 +16,12 @@ Grab the latest [release](https://github.com/KLEPTOROTH/arcdps-uploader/releases
 Use *Alt-Shift-U* to bring the uploader window up.
 
 ## Changelog
+**1.2.3**
+* Wingman links resolve correctly now (the page slug is nested in the API response; it was read from the wrong place, so WM buttons never appeared)
+* A log Wingman already has ("already exists") now counts as uploaded and gets its page link fetched
+* Renamed the "View" button to "DPS" (opens dps.report; "WM" opens Wingman)
+* Added `uploader_livetest`, a local end-to-end harness that runs the real upload pipeline against a directory of logs and verifies the stored links
+
 **1.2.2**
 * "WM" button next to "View" in the log table opens the log's Wingman page (the page is looked up after each Wingman upload and stored with the log)
 * Database schema changes are now non-destructive: new columns are added via in-place `ALTER TABLE`, with an automatic `uploader.db.bak` backup taken before every schema sync

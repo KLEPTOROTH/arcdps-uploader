@@ -316,7 +316,7 @@ void Uploader::imgui_draw_logs() {
     ImGui::BeginChild("List", log_size, ImGuiChildFlags_Borders, ImGuiWindowFlags_NoScrollbar);
 
     ImGui::Columns(3, "mycolumns");
-    float last_col = log_size.x - ImGui::CalcTextSize("View WM").x * 1.9f;
+    float last_col = log_size.x - ImGui::CalcTextSize("DPS WM").x * 1.9f;
     ImGui::SetColumnOffset(0, 0);
     ImGui::SetColumnOffset(
         1, last_col - ImGui::CalcTextSize("00:00PM (Mon Jan 00)").x * 1.1f);
@@ -357,7 +357,7 @@ void Uploader::imgui_draw_logs() {
         ImGui::NextColumn();
         if (s.uploaded) {
             ImGui::PushID(s.filename.c_str());
-            if (ImGui::SmallButton("View")) {
+            if (ImGui::SmallButton("DPS")) {
                 open_url_in_browser(s.permalink);
             }
             if (ImGui::IsItemHovered()) {

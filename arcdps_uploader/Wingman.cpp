@@ -38,10 +38,13 @@ std::string fetch_log_link(const std::string& filename, long long filesize,
             cpr::Timeout{20000});
         if (resp.status_code != 200) continue;
         try {
+            // Success shape: {"log": {"html": "<slug>", ...}, "success": true}
             json j = json::parse(resp.text);
-            std::string slug = j.value("html", "");
-            if (!slug.empty()) {
-                return log_url(slug);
+            if (j.contains("log") && j["log"].is_object()) {
+                std::string slug = j["log"].value("html", "");
+                if (!slug.empty()) {
+                    return log_url(slug);
+                }
             }
         } catch (const json::exception&) {
             // "False" or other non-json body: not indexed yet
@@ -74,6 +77,11 @@ std::pair<bool, std::string> upload_evtc(const std::string& file_path,
             return {true, "uploaded"};
         }
         std::string err = j.value("error", "unknown error");
+        // A duplicate means the log is already published -- that is a
+        // success for our purposes (the page exists; fetch its link).
+        if (err.find("already exists") != std::string::npos) {
+            return {true, "already on Wingman"};
+        }
         LOG_F(WARNING, "Wingman: rejected: %s", err.c_str());
         return {false, "rejected: " + err};
     } catch (const json::exception&) {

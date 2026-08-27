@@ -63,6 +63,13 @@ extern "C" __declspec(dllexport) void* get_init_addr(
     get_ini_path = (void*)GetProcAddress((HMODULE)arcdll, "e0");
     arc_log = (void*)GetProcAddress((HMODULE)arcdll, "e8");
 
+    // Route our imgui allocations through arcdps's allocator. The context is
+    // shared: without this, blocks we allocate into it get freed by arcdps's
+    // CRT (and vice versa), corrupting the heap the moment the window opens.
+    if (mallocfn && freefn) {
+        ImGui::SetAllocatorFunctions((ImGuiMemAllocFunc)mallocfn,
+                                     (ImGuiMemFreeFunc)freefn, nullptr);
+    }
     ImGui::SetCurrentContext(imguictx);
     return mod_init;
 }

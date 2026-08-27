@@ -17,14 +17,11 @@ Use *Alt-Shift-U* to bring the uploader window up.
 
 ## Changelog
 **1.2.2**
-* **Fixed destructive database migration**: v1.2.1's new column caused sqlite_orm to drop and recreate the `logs` table, wiping upload history and re-uploading recent logs. Schema changes now happen via in-place `ALTER TABLE` with an automatic `uploader.db.bak` backup taken before every schema sync.
-* Wingman log links now resolve: the page lookup sends the evtc's real file name (with extension) and polls patiently while Wingman indexes — the WM button appears once the page exists
+* "WM" button next to "View" in the log table opens the log's Wingman page (the page is looked up after each Wingman upload and stored with the log)
+* Database schema changes are now non-destructive: new columns are added via in-place `ALTER TABLE`, with an automatic `uploader.db.bak` backup taken before every schema sync
 * Default copy format is now one line per fight (`@1 - *@2*\n`)
 * The uploader window opens on the character select and loading screens again (1.1.0 regression)
 * A pending update now pops up a notice at the character select screen, the way arcdps surfaces its own updates (dismissable per session)
-
-**1.2.1**
-* "WM" button next to "View" in the log table opens the log's Wingman page (link is fetched and stored after each Wingman upload)
 
 **1.2.0**
 * Self-updater: checks GitHub releases at startup (arcdps-style — downloads into `addons\uploader\`, swaps via rename, new version loads on the next game start; previous version kept as `d3d9_uploader.dll_prev` for rollback). Toggle with "Auto-update on launch" under Options → Other.

@@ -14,7 +14,12 @@ void Settings::load() {
         LOG_F(INFO, "Loaded INI file");
         wvw_detailed_enabled = ini.GetBoolValue(
             INI_SECTION_SETTINGS, INI_WVW_DETAILED_SETTING, false);
-        msg_format = ini.GetValue(INI_SECTION_SETTINGS, INI_MSG_FORMAT, "@1 - \\n*@2*\\n\\n");
+        msg_format = ini.GetValue(INI_SECTION_SETTINGS, INI_MSG_FORMAT, DEFAULT_MSG_FORMAT);
+        // A present-but-empty ini value bypasses the GetValue default and then
+        // gets saved back, sticking forever. Heal it here.
+        if (msg_format.empty()) {
+            msg_format = DEFAULT_MSG_FORMAT;
+        }
         recent_minutes = ini.GetLongValue(INI_SECTION_SETTINGS, INI_RECENT_MINUTES, 150);
         gw2bot_enabled =
             ini.GetBoolValue(INI_SECTION_SETTINGS, INI_GW2BOT_ENABLED, false);

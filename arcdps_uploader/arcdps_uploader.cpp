@@ -131,7 +131,7 @@ arcdps_exports* mod_init() {
     exports.sig = 0x92485179;
     exports.imguivers = IMGUI_VERSION_NUM;
     exports.out_name = "uploader";
-    exports.out_build = "1.1.0";
+    exports.out_build = "1.1.1";
     exports.wnd_nofilter = mod_wnd;
     exports.combat = mod_combat;
     exports.imgui = mod_imgui;

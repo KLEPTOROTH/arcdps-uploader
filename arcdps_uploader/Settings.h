@@ -42,6 +42,10 @@ struct Settings
 	void save();
 };
 
+// Used whenever the configured format string is empty; an empty format would
+// make "Copy & Format" produce nothing but the date header.
+inline constexpr const char* DEFAULT_MSG_FORMAT = "@1 - \\n*@2*\\n\\n";
+
 inline constexpr char* INI_SECTION_SETTINGS = "Settings";
 inline constexpr char* INI_WVW_DETAILED_SETTING = "WvW_Detailed";
 inline constexpr char* INI_MSG_FORMAT = "Msg_Format";

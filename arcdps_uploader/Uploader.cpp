@@ -1353,12 +1353,16 @@ void Uploader::queue_status_message(const StatusMessage& msg) {
 
 std::string Uploader::format_msg(Log log) {
     std::string f = settings.msg_format; // get format string
+    if (f.empty()) {
+        f = DEFAULT_MSG_FORMAT;
+    }
     std::string msg = "";
     std::string::const_iterator it = f.begin();
     while (it != f.end()) {
         char c = *it++;
-        if (c == '\\' && it != f.end() && *it++ == 'n') {
+        if (c == '\\' && it != f.end() && *it == 'n') {
             c = '\n';
+            ++it;
         }
         msg += c;
     }

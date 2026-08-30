@@ -281,3 +281,4 @@ _deps
 *.vcxproj.user
 *.vcxproj.filters
 *.sln
+ts_check/

@@ -16,6 +16,10 @@ Grab the latest [release](https://github.com/KLEPTOROTH/arcdps-uploader/releases
 Use *Alt-Shift-U* to bring the uploader window up.
 
 ## Changelog
+**1.2.7**
+* Added a built-in crash handler. arcdps does not always write a crash log — a CRT fast-fail (`0xc0000409`) or heap corruption can abort the process too abruptly — so the addon now installs its own diagnostics at load and, on a fault, appends a timestamped stack trace to `addons/uploader/uploader_crash.log`. It captures access violations, CRT invalid-parameter fast-fails, heap corruption, pure-virtual calls, and unhandled C++ exceptions. The Release DLL now ships an optimized build with a matching PDB so those stack traces name the exact function and line.
+* No behavior changes — this release only adds crash reporting, to pin down a character-select crash that survives the exception-hardening in 1.2.5/1.2.6 (it is a fast-fail, which `try/catch` cannot intercept).
+
 **1.2.6**
 * Crash-hardening pass across the whole addon so a bad server response, an odd log file, a large config value, or shutdown timing can no longer take the game down:
   * The upload thread now parses the dps.report response defensively and can never let an exception escape (an unexpected/HTML/rate-limited response used to unwind off the worker thread and crash the game at character select). Failing logs are marked so they are not retried and re-crashed on every launch.

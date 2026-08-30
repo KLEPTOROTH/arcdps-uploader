@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iomanip>
 
+#include "CrashHandler.h"
 #include "SimpleIni.h"
 #include "Updater.h"
 #include "Uploader.h"
@@ -87,6 +88,15 @@ arcdps_exports* mod_init() {
     int argc = 1;
     char* argv[] = {"uploader.log", nullptr};
     loguru::init(argc, argv);
+
+    // Install crash diagnostics as early as possible: arcdps often produces no
+    // crash log (a CRT fast-fail / 0xc0000409 aborts the process too abruptly),
+    // so we capture a stack trace ourselves to addons/uploader/.
+    {
+        std::error_code ec;
+        fs::create_directories("./addons/uploader/", ec);
+        CrashHandler::install("./addons/uploader/uploader_crash.log");
+    }
 
     std::optional<fs::path> log_path;
 

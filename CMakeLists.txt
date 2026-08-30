@@ -20,6 +20,7 @@ set(SOURCE
     arcdps_uploader/Updater.cpp
     arcdps_uploader/Wingman.cpp
     arcdps_uploader/Settings.cpp
+    arcdps_uploader/CrashHandler.cpp
     arcdps_uploader/Log.cpp
     arcdps_uploader/imgui/imgui.cpp
     arcdps_uploader/imgui/imgui_demo.cpp
@@ -36,6 +37,7 @@ set(HEADERS
     arcdps_uploader/arcdps_uploader.h
     arcdps_uploader/arcdps_defs.h
     arcdps_uploader/arc_logging.h
+    arcdps_uploader/CrashHandler.h
     arcdps_uploader/Aleeva.h
     arcdps_uploader/Uploader.h
     arcdps_uploader/Updater.h
@@ -70,6 +72,10 @@ target_compile_definitions(d3d9_uploader PRIVATE
     CURL_STATICLIB
 )
 target_compile_options(d3d9_uploader PUBLIC "/Zc:__cplusplus")
+# Emit a PDB for the Release DLL (kept optimized) so crash-handler stack traces
+# can be symbolized. /DEBUG defaults to /OPT:NOREF,NOICF, so restore them.
+target_compile_options(d3d9_uploader PRIVATE "/Zi")
+target_link_options(d3d9_uploader PRIVATE "/DEBUG" "/OPT:REF" "/OPT:ICF")
 
 add_executable(uploader_standalone
     arcdps_uploader/main.cpp

@@ -65,6 +65,10 @@ class Uploader
 	std::mutex ts_msg_mutex;
 	std::vector<StatusMessage> thread_status_messages;
 
+	// Guards UI-owned state (userToken and the settings strings the worker
+	// threads read) against concurrent edits on the imgui thread.
+	std::mutex ui_mutex;
+
 	std::thread upload_thread;
 	std::atomic<bool> upload_thread_run;
 	std::mutex ut_mutex;
@@ -79,6 +83,11 @@ class Uploader
 	void imgui_draw_update_notice();
 	void create_log_table(Log& l);
 
+	// Reloads the webhook list from the db and refreshes the imgui edit
+	// buffers, under wh_mutex so the upload thread never sees a half-swapped
+	// vector.
+	void reload_webhooks();
+
 	void check_webhooks(int log_id);
 	void check_gw2bot(int log_id);
 	void check_aleeva(int log_id);
@@ -90,6 +99,10 @@ class Uploader
 
 	void queue_status_message(const std::string& msg, int log_id = -1);
 	void queue_status_message(const StatusMessage& status);
+
+	// Best-effort: mark a log uploaded+error in the db so the auto-upload
+	// queue stops retrying (and re-crashing on) it. Never throws.
+	void mark_log_errored(int log_id);
 
 	std::string format_msg(Log log);
 public:

@@ -18,12 +18,17 @@
 #include <cstdlib>
 #include <filesystem>
 
+#include "Log.h"
 #include "Revtc.h"
 #include "Updater.h"
 #include "Wingman.h"
 #include "arcdps_uploader.h"
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_null.h"
+
+// Defined in Uploader.cpp. Exception-safe dps.report response parser.
+bool parse_dpsreport_response(const std::string& body, Log& log,
+                             std::string& token_out);
 
 static size_t g_alloc_calls = 0;
 static size_t g_free_calls = 0;
@@ -162,6 +167,56 @@ int main() {
         return 1;
     }
     printf("wingman log url OK\n");
+
+    // Regression: a malformed / unexpected dps.report 200 body must never throw
+    // out of the parser (previously an unhandled json exception unwound off the
+    // upload thread -> std::terminate -> 0xc0000409, the crash seen at
+    // character select on real machines). Every hostile body must return false
+    // without crashing, and a well-formed body must parse correctly.
+    {
+        const char* hostile[] = {
+            "",
+            "not json at all",
+            "<html><body>503 Service Unavailable</body></html>",
+            "{",
+            "{}",
+            "[]",
+            "null",
+            "{\"error\":\"rate limited\"}",
+            "{\"permalink\":123}",                    // wrong type
+            "{\"permalink\":\"https://x\",\"encounter\":42}",  // encounter not obj
+            "{\"permalink\":\"https://x\",\"encounter\":{\"bossId\":\"nope\"}}",
+            "{\"id\":null,\"permalink\":null}",
+        };
+        for (const char* b : hostile) {
+            Log l{};
+            std::string tok;
+            parse_dpsreport_response(b, l, tok);  // must not throw/crash
+        }
+        Log good{};
+        std::string tok;
+        bool ok = parse_dpsreport_response(
+            "{\"id\":\"AAAA\",\"permalink\":\"https://dps.report/AAAA\","
+            "\"encounter\":{\"bossId\":15438,\"boss\":\"Vale Guardian\","
+            "\"success\":true,\"jsonAvailable\":true},"
+            "\"userToken\":\"tok123\"}",
+            good, tok);
+        if (!ok || good.permalink != "https://dps.report/AAAA" ||
+            good.boss_id != 15438 || good.boss_name != "Vale Guardian" ||
+            !good.success || tok != "tok123") {
+            printf("FAIL: parse_dpsreport_response good-path\n");
+            return 1;
+        }
+        // An empty-permalink 200 must be reported as unusable.
+        Log nolink{};
+        std::string tok2;
+        if (parse_dpsreport_response("{\"id\":\"x\"}", nolink, tok2)) {
+            printf("FAIL: parse_dpsreport_response should reject no-permalink\n");
+            return 1;
+        }
+        printf("dps.report response parsing OK: %zu hostile bodies survived\n",
+               sizeof(hostile) / sizeof(hostile[0]));
+    }
 
     typedef uintptr_t (*ModReleaseFn)();
     ModReleaseFn release_fn = (ModReleaseFn)get_release_addr();

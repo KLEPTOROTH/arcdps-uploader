@@ -112,25 +112,39 @@ arcdps_exports* mod_init() {
         }
     }
 
-    const fs::path uploader_data_path = "./addons/uploader/";
-    if (!fs::exists(uploader_data_path)) {
-        fs::create_directory(uploader_data_path);
+    // Anything below can throw (filesystem, sqlite, ini). mod_init is called
+    // across arcdps' C ABI, so a throw here would crash the game at load.
+    // On failure we leave `up` null and still return a valid exports table:
+    // arcdps loads the addon, every callback null-guards `up`, and the addon
+    // is simply inert instead of taking the game down.
+    try {
+        const fs::path uploader_data_path = "./addons/uploader/";
+        std::error_code ec;
+        if (!fs::exists(uploader_data_path, ec)) {
+            fs::create_directory(uploader_data_path, ec);
+        }
+
+        // Loguru Log
+        fs::path uploader_log_path = uploader_data_path / "uploader.log";
+        loguru::add_file(uploader_log_path.string().c_str(), loguru::Truncate,
+                         loguru::Verbosity_MAX);
+
+        // Uploader
+        up = new Uploader(uploader_data_path, log_path);
+        up->start_async_refresh_log_list();
+        up->start_upload_thread();
+
+        // Self-update (arcdps-style: stage in our config dir, swap via rename,
+        // new version loads next game start)
+        Updater::cleanup_old();
+        Updater::begin_check(UPLOADER_VERSION, up->settings.auto_update);
+    } catch (const std::exception& e) {
+        LOG_F(ERROR, "mod_init failed, addon disabled: %s", e.what());
+        up = nullptr;
+    } catch (...) {
+        LOG_F(ERROR, "mod_init failed, addon disabled: unknown exception");
+        up = nullptr;
     }
-
-    // Loguru Log
-    fs::path uploader_log_path = uploader_data_path / "uploader.log";
-    loguru::add_file(uploader_log_path.string().c_str(), loguru::Truncate,
-                     loguru::Verbosity_MAX);
-
-    // Uploader
-    up = new Uploader(uploader_data_path, log_path);
-    up->start_async_refresh_log_list();
-    up->start_upload_thread();
-
-    // Self-update (arcdps-style: stage in our config dir, swap via rename,
-    // new version loads next game start)
-    Updater::cleanup_old();
-    Updater::begin_check(UPLOADER_VERSION, up->settings.auto_update);
 
     /* for arcdps */
     exports.size = sizeof(arcdps_exports);
@@ -148,7 +162,16 @@ arcdps_exports* mod_init() {
 /* release mod -- return ignored */
 uintptr_t mod_release() {
     Updater::shutdown();
-    delete up;
+    // Null the pointer BEFORE freeing so a callback that arcdps fires during
+    // teardown (mod_combat may be called asynchronously) sees null and no-ops
+    // instead of dereferencing freed memory.
+    Uploader* p = up;
+    up = nullptr;
+    try {
+        delete p;
+    } catch (...) {
+        LOG_F(ERROR, "mod_release: exception during shutdown");
+    }
     return 0;
 }
 
@@ -184,7 +207,7 @@ uintptr_t mod_wnd(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
         }
     }
 
-    if (KeyAlt && KeyShift && KeyU) {
+    if (up && KeyAlt && KeyShift && KeyU) {
         up->is_open = !up->is_open;
         LOG_F(INFO, "Window Toggle: %i", up->is_open);
     }
@@ -197,7 +220,7 @@ uintptr_t mod_wnd(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
  * events. despawn statechange only on marked boss npcs */
 uintptr_t mod_combat(cbtevent* ev, ag* src, ag* dst, char* skillname,
                      uint64_t id, uint64_t revision) {
-    if (ev) {
+    if (up && ev) {
         if (src && src->self) {
             if (ev->is_statechange == CBTS_ENTERCOMBAT) {
                 up->in_combat = true;
@@ -210,7 +233,17 @@ uintptr_t mod_combat(cbtevent* ev, ag* src, ag* dst, char* skillname,
 }
 
 uintptr_t mod_imgui(uint32_t not_charsel_or_loading) {
-    return up->imgui_tick(not_charsel_or_loading);
+    // Nothing may unwind across arcdps' C ABI frame: an exception escaping
+    // here is undefined behavior and crashes the game. Catch everything.
+    if (!up) return 0;
+    try {
+        return up->imgui_tick(not_charsel_or_loading);
+    } catch (const std::exception& e) {
+        LOG_F(ERROR, "mod_imgui exception: %s", e.what());
+    } catch (...) {
+        LOG_F(ERROR, "mod_imgui: unknown exception");
+    }
+    return 0;
 }
 
 /* test seam: push a status message into the live uploader (see smoketest) */
@@ -219,7 +252,11 @@ void uploader_test_push_status(const char* msg) {
 }
 
 void mod_options_windows(char* windowname) {
-	if (!windowname) {
-		up->imgui_window_checkbox();	
+	if (up && !windowname) {
+		try {
+			up->imgui_window_checkbox();
+		} catch (...) {
+			LOG_F(ERROR, "mod_options_windows: unknown exception");
+		}
 	}
 }

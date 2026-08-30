@@ -56,6 +56,62 @@ inline auto initStorage(const std::string& path) {
 using Storage = decltype(initStorage(""));
 static std::unique_ptr<Storage> storage;
 
+// One sqlite connection is shared by the imgui thread, the upload thread and
+// the async refresh. sqlite_orm is not safe for concurrent use of a single
+// connection, so every storage-> access is serialized behind this mutex.
+// Recursive so a locked path may call another locked helper; it is never held
+// across network I/O (cpr calls), only around the actual db operations.
+static std::recursive_mutex db_mutex;
+using db_lock = std::lock_guard<std::recursive_mutex>;
+
+// The recent-log list is capped at this size everywhere: it bounds both the
+// `logs` query (limit) and the fixed `selected[]` selection array, so they can
+// never disagree and index out of bounds.
+static constexpr int kMaxLogs = 75;
+
+// Copy a std::string into a fixed char buffer: never overflows (truncates a
+// too-long source) and always leaves the buffer NUL-terminated. Guards every
+// string->buffer copy against oversized db/server values (/GS 0xc0000409).
+static void safe_copy(char* dst, size_t dst_size, const std::string& src) {
+    if (!dst || dst_size == 0) return;
+    size_t n = src.size();
+    if (n > dst_size - 1) n = dst_size - 1;
+    memcpy(dst, src.data(), n);
+    dst[n] = '\0';
+}
+template <size_t N>
+static void safe_copy(char (&dst)[N], const std::string& src) {
+    safe_copy(dst, N, src);
+}
+
+// Exception-safe parse of a dps.report /uploadContent response body into `log`.
+// Fills token_out with any returned userToken. Returns true only when a usable
+// permalink was found. NEVER throws: a malformed, HTML, empty, or wrong-shaped
+// body just yields false. This is the guard that keeps a bad server response
+// from unwinding off the upload thread (std::terminate -> 0xc0000409).
+bool parse_dpsreport_response(const std::string& body, Log& log,
+                             std::string& token_out) {
+    try {
+        json parsed = json::parse(body);
+        log.report_id = parsed.value("id", std::string());
+        log.permalink = parsed.value("permalink", std::string());
+        if (parsed.contains("encounter") && parsed["encounter"].is_object()) {
+            const json& enc = parsed["encounter"];
+            log.boss_id = enc.value("bossId", 0);
+            log.boss_name = enc.value("boss", std::string());
+            log.json_available = enc.value("jsonAvailable", false);
+            log.success = enc.value("success", false);
+        }
+        if (parsed.contains("players")) {
+            log.players_json = parsed["players"].dump();
+        }
+        token_out = parsed.value("userToken", std::string());
+        return !log.permalink.empty();
+    } catch (...) {
+        return false;
+    }
+}
+
 Uploader::Uploader(fs::path data_path, std::optional<fs::path> custom_log_path)
     : is_open(false), in_combat(false), settings(data_path / "uploader.ini") {
     // Load settings from INI
@@ -105,23 +161,18 @@ Uploader::Uploader(fs::path data_path, std::optional<fs::path> custom_log_path)
     userToken.id = userTokens.front().id;
     userToken.value = userTokens.front().value;
     userToken.disabled = userTokens.front().disabled;
-    memset(userToken.value_buf, 0, sizeof(userToken.value_buf));
     if (userToken.disabled) {
-        memcpy(userToken.value_buf, "--DISABLED--", sizeof("--DISABLED--"));
+        safe_copy(userToken.value_buf, "--DISABLED--");
     } else {
-        memcpy(userToken.value_buf, userToken.value.c_str(),
-               userToken.value.size());
+        safe_copy(userToken.value_buf, userToken.value);
     }
 
     // Webhooks
     webhooks = storage->get_all<Webhook>();
     for (auto& wh : webhooks) {
-        memset(wh.name_buf, 0, 64);
-        memcpy(wh.name_buf, wh.name.c_str(), wh.name.size());
-        memset(wh.url_buf, 0, 192);
-        memcpy(wh.url_buf, wh.url.c_str(), wh.url.size());
-        memset(wh.filter_buf, 0, 256);
-        memcpy(wh.filter_buf, wh.filter.c_str(), wh.filter.size());
+        safe_copy(wh.name_buf, wh.name);
+        safe_copy(wh.url_buf, wh.url);
+        safe_copy(wh.filter_buf, wh.filter);
     }
 
     if (custom_log_path) {
@@ -147,7 +198,8 @@ Uploader::Uploader(fs::path data_path, std::optional<fs::path> custom_log_path)
     }
 
     LOG_F(INFO, "Logs Path: %s", log_path.string().c_str());
-    if (!std::filesystem::exists(log_path)) {
+    std::error_code log_path_ec;
+    if (!std::filesystem::exists(log_path, log_path_ec) || log_path_ec) {
         {
             StatusMessage msg;
             msg.msg =
@@ -164,11 +216,15 @@ Uploader::~Uploader() {
     // Save our settings if we previously loaded/created an ini file
     settings.save();
 
-    // Stop the thread from looping and wait for it to finish executing
-    // Otherwise, GW2 will not exit
-    upload_thread_run = false;
+    // Stop the upload thread. Set the flag under the same mutex the cv waits
+    // on, then notify, so the wakeup can never be lost (otherwise the join
+    // below can hang forever and GW2 never exits).
+    {
+        std::lock_guard<std::mutex> lk(ut_mutex);
+        upload_thread_run = false;
+    }
     ut_cv.notify_all();
-    upload_thread.join();
+    if (upload_thread.joinable()) upload_thread.join();
 }
 
 uintptr_t Uploader::imgui_tick(uint32_t not_charsel_or_loading) {
@@ -328,7 +384,7 @@ void Uploader::imgui_draw_logs() {
     ImGui::TextUnformatted("");
     ImGui::NextColumn();
     ImGui::Separator();
-    static bool selected[75]{false};
+    static bool selected[kMaxLogs]{false};
     static int select_anchor = -1;
     for (int i = 0; i < logs.size(); ++i) {
         Log& s = logs.at(i);
@@ -358,7 +414,7 @@ void Uploader::imgui_draw_logs() {
                 // kept so repeated shift-clicks extend from the same spot.
                 int lo = (std::min)(select_anchor, i);
                 int hi = (std::max)(select_anchor, i);
-                for (int k = lo; k <= hi && k < 75; k++) {
+                for (int k = lo; k <= hi && k < kMaxLogs; k++) {
                     if (success_only && !logs.at(k).success) continue;
                     selected[k] = true;
                 }
@@ -503,7 +559,13 @@ void Uploader::imgui_draw_status() {
     for (const auto& status : status_messages) {
         ImGui::TextUnformatted(status.msg.c_str());
         if (status.log_id > 0) {
-            auto log = storage->get_pointer<Log>(status.log_id);
+            std::unique_ptr<Log> log;
+            try {
+                db_lock dlk(db_mutex);
+                log = storage->get_pointer<Log>(status.log_id);
+            } catch (...) {
+                log.reset();  // never unwind through the imgui render stack
+            }
             if (log) {
                 if (log->permalink.size() > 8) {
                     ImGui::Text("%s",
@@ -547,7 +609,9 @@ void Uploader::imgui_draw_options() {
                 ImGui::EndTooltip();
             }
             if (ImGui::Button("Save") && !userToken.disabled) {
+                std::lock_guard<std::mutex> ulk(ui_mutex);
                 userToken.value = userToken.value_buf;
+                db_lock lk(db_mutex);
                 storage->update(userToken);
             }
             if (ImGui::IsItemHovered()) {
@@ -563,9 +627,11 @@ void Uploader::imgui_draw_options() {
             }
             if (ImGui::BeginPopup("Reset_Confirm")) {
                 if (ImGui::Button("Confirm")) {
-                    memset(userToken.value_buf, 0, sizeof(userToken.value_buf));
-                    userToken.value = userToken.value_buf;
+                    std::lock_guard<std::mutex> ulk(ui_mutex);
+                    safe_copy(userToken.value_buf, "");
+                    userToken.value = "";
                     userToken.disabled = false;
+                    db_lock lk(db_mutex);
                     storage->update(userToken);
                 }
                 ImGui::EndPopup();
@@ -582,18 +648,18 @@ void Uploader::imgui_draw_options() {
             ImGui::SameLine();
             if (userToken.disabled) {
                 if (ImGui::Button("Enable")) {
-                    memset(userToken.value_buf, 0, sizeof(userToken.value_buf));
-                    memcpy(userToken.value_buf, userToken.value.c_str(),
-                           userToken.value.size());
+                    std::lock_guard<std::mutex> ulk(ui_mutex);
+                    safe_copy(userToken.value_buf, userToken.value);
                     userToken.disabled = false;
+                    db_lock lk(db_mutex);
                     storage->update(userToken);
                 }
             } else {
                 if (ImGui::Button("Disable")) {
-                    memset(userToken.value_buf, 0, sizeof(userToken.value_buf));
-                    memcpy(userToken.value_buf, "--DISABLED--",
-                           sizeof("--DISABLED--"));
+                    std::lock_guard<std::mutex> ulk(ui_mutex);
+                    safe_copy(userToken.value_buf, "--DISABLED--");
                     userToken.disabled = true;
+                    db_lock lk(db_mutex);
                     storage->update(userToken);
                 }
             }
@@ -610,6 +676,7 @@ void Uploader::imgui_draw_options() {
             ImGui::TreePop();
         }
         if (ImGui::TreeNode("Webhooks (Discord)")) {
+            int webhook_to_delete = -1;
             for (auto& wh : webhooks) {
                 ImGui::BeginChild(
                     wh.name.c_str(),
@@ -712,9 +779,11 @@ void Uploader::imgui_draw_options() {
                 }
 
                 if (ImGui::Button("Save")) {
+                    std::lock_guard<std::mutex> lk(wh_mutex);
                     wh.name = wh.name_buf;
                     wh.url = wh.url_buf;
                     wh.filter = wh.filter_buf;
+                    db_lock dlk(db_mutex);
                     storage->update(wh);
                 }
                 ImGui::SameLine();
@@ -724,23 +793,23 @@ void Uploader::imgui_draw_options() {
                 }
                 if (ImGui::BeginPopup("Delete_Confirm")) {
                     if (ImGui::Button("Confirm")) {
-                        storage->remove<Webhook>(wh.id);
-                        webhooks = storage->get_all<Webhook>();
-                        for (auto& wh : webhooks) {
-                            memset(wh.name_buf, 0, 64);
-                            memcpy(wh.name_buf, wh.name.c_str(),
-                                   wh.name.size());
-                            memset(wh.url_buf, 0, 192);
-                            memcpy(wh.url_buf, wh.url.c_str(), wh.url.size());
-                            memset(wh.filter_buf, 0, 256);
-                            memcpy(wh.filter_buf, wh.filter.c_str(),
-                                   wh.filter.size());
-                        }
+                        // Defer the actual delete+reload until after the loop:
+                        // reassigning `webhooks` here would invalidate this
+                        // range-for's iterator.
+                        webhook_to_delete = wh.id;
                     }
                     ImGui::EndPopup();
                 }
 
                 ImGui::EndChild();
+            }
+
+            if (webhook_to_delete >= 0) {
+                {
+                    db_lock dlk(db_mutex);
+                    storage->remove<Webhook>(webhook_to_delete);
+                }
+                reload_webhooks();
             }
 
             ImGui::Separator();
@@ -754,16 +823,11 @@ void Uploader::imgui_draw_options() {
                 nwh.wvw = true;
                 nwh.success = true;
                 nwh.filter_min = 10;
-                storage->insert(nwh);
-                webhooks = storage->get_all<Webhook>();
-                for (auto& wh : webhooks) {
-                    memset(wh.name_buf, 0, 64);
-                    memcpy(wh.name_buf, wh.name.c_str(), wh.name.size());
-                    memset(wh.url_buf, 0, 192);
-                    memcpy(wh.url_buf, wh.url.c_str(), wh.url.size());
-                    memset(wh.filter_buf, 0, 256);
-                    memcpy(wh.filter_buf, wh.filter.c_str(), wh.filter.size());
+                {
+                    db_lock dlk(db_mutex);
+                    storage->insert(nwh);
                 }
+                reload_webhooks();
             }
 
             ImGui::TreePop();
@@ -801,7 +865,12 @@ void Uploader::imgui_draw_options() {
             if (settings.gw2bot_enabled) {
                 ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x -
                                      ImGui::CalcTextSize("EVTC Api Key").x - 5);
-                ImGui::InputText("EVTC Api Key", &settings.gw2bot_key);
+                {
+                    // Locked: the upload thread snapshots gw2bot_key; this
+                    // InputText can reallocate the std::string as the user types.
+                    std::lock_guard<std::mutex> ulk(ui_mutex);
+                    ImGui::InputText("EVTC Api Key", &settings.gw2bot_key);
+                }
                 ImGui::PopItemWidth();
                 if (ImGui::IsItemHovered()) {
                     ImGui::BeginTooltip();
@@ -837,7 +906,12 @@ void Uploader::imgui_draw_options() {
             if (settings.wingman_enabled) {
                 ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x -
                                      ImGui::CalcTextSize("Account name").x - 5);
-                ImGui::InputText("Account name", &settings.wingman_account);
+                {
+                    // Locked: check_wingman snapshots wingman_account on the
+                    // upload thread while this edits it.
+                    std::lock_guard<std::mutex> ulk(ui_mutex);
+                    ImGui::InputText("Account name", &settings.wingman_account);
+                }
                 ImGui::PopItemWidth();
                 if (ImGui::IsItemHovered()) {
                     ImGui::BeginTooltip();
@@ -920,7 +994,12 @@ void Uploader::imgui_draw_options_aleeva() {
                 const char* access_title = "Access Code";
                 ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x -
                                      ImGui::CalcTextSize(access_title).x - 5);
-                ImGui::InputText(access_title, &settings.aleeva.access_code);
+                {
+                    // Locked: the Aleeva login task reads settings on another
+                    // thread while this edits the access code.
+                    std::lock_guard<std::mutex> ulk(ui_mutex);
+                    ImGui::InputText(access_title, &settings.aleeva.access_code);
+                }
                 ImGui::PopItemWidth();
                 if (ImGui::IsItemHovered()) {
                     ImGui::BeginTooltip();
@@ -932,13 +1011,17 @@ void Uploader::imgui_draw_options_aleeva() {
 
                 if (ImGui::Button("Login")) {
                     auto future = std::async(
-                        std::launch::async, [&]() { 
-							StatusMessage sm;
-							sm.msg = "Aleeva login failed. Please check your access code and try to login again.";
-                            if (Aleeva::login(settings)) {
-                                sm.msg = "Aleeva login successful.";
+                        std::launch::async, [this]() {
+                            std::string msg =
+                                "Aleeva login failed. Please check your access "
+                                "code and try to login again.";
+                            try {
+                                if (Aleeva::login(settings)) {
+                                    msg = "Aleeva login successful.";
+                                }
+                            } catch (...) {
                             }
-                            status_messages.push_back(sm);
+                            queue_status_message(msg);
                         });
                 }
             } else {
@@ -1125,8 +1208,25 @@ void Uploader::create_log_table(Log& l) {
     }
 }
 
+void Uploader::reload_webhooks() {
+    std::lock_guard<std::mutex> lk(wh_mutex);
+    {
+        db_lock dlk(db_mutex);
+        webhooks = storage->get_all<Webhook>();
+    }
+    for (auto& wh : webhooks) {
+        safe_copy(wh.name_buf, wh.name);
+        safe_copy(wh.url_buf, wh.url);
+        safe_copy(wh.filter_buf, wh.filter);
+    }
+}
+
 void Uploader::check_webhooks(int log_id) {
-    auto log = storage->get_pointer<Log>(log_id);
+    std::unique_ptr<Log> log;
+    {
+        db_lock dlk(db_mutex);
+        log = storage->get_pointer<Log>(log_id);
+    }
     if (log) {
         if (!log->players) {
             try {
@@ -1140,7 +1240,14 @@ void Uploader::check_webhooks(int log_id) {
 
         Revtc::BossCategory category =
             Revtc::Parser::encounterCategory((Revtc::BossID)log->boss_id);
-        for (const auto& wh : webhooks) {
+        // Iterate a snapshot: the imgui thread can reassign `webhooks` (Add/
+        // Delete) while we're here, which would invalidate a live iterator.
+        std::vector<Webhook> whs;
+        {
+            std::lock_guard<std::mutex> lk(wh_mutex);
+            whs = webhooks;
+        }
+        for (const auto& wh : whs) {
             bool process = true;
             if (!log->success && wh.success) process = false;
             if (category == Revtc::BossCategory::RAIDS && !wh.raids)
@@ -1161,14 +1268,21 @@ void Uploader::check_webhooks(int log_id) {
                 std::string account;
                 std::istringstream accountStream(wh.filter);
                 while (std::getline(accountStream, account, ',')) {
-                    if (std::isspace(account.front())) {
-                        account = account.substr(1);
+                    // Trim whitespace. front()/back() on an empty token is UB,
+                    // and isspace/tolower require an unsigned-char value (a
+                    // negative char from a non-ASCII account name is UB).
+                    while (!account.empty() &&
+                           std::isspace((unsigned char)account.front())) {
+                        account.erase(account.begin());
                     }
-                    if (account.size() > 0 && std::isspace(account.back())) {
+                    while (!account.empty() &&
+                           std::isspace((unsigned char)account.back())) {
                         account.pop_back();
                     }
-                    std::transform(account.begin(), account.end(),
-                                   account.begin(), (int (*)(int))std::tolower);
+                    if (account.empty()) continue;
+                    std::transform(
+                        account.begin(), account.end(), account.begin(),
+                        [](unsigned char c) { return (char)std::tolower(c); });
                     accounts.push_back(account);
                 }
 
@@ -1176,17 +1290,23 @@ void Uploader::check_webhooks(int log_id) {
                     const auto& players = *log->players;
                     int found = 0;
                     for (auto it = players.begin(); it != players.end(); ++it) {
-                        auto& display_name =
-                            it.value().value("display_name", "");
-                        std::transform(display_name.begin(), display_name.end(),
-                                       display_name.begin(),
-                                       (int (*)(int))std::tolower);
+                        if (!it.value().is_object()) continue;
+                        // By value: json::value() returns a temporary; binding
+                        // it to a reference would dangle.
+                        std::string display_name =
+                            it.value().value("display_name", std::string());
+                        std::transform(
+                            display_name.begin(), display_name.end(),
+                            display_name.begin(),
+                            [](unsigned char c) { return (char)std::tolower(c); });
                         if (std::find(accounts.begin(), accounts.end(),
                                       display_name) != accounts.end()) {
                             found++;
                         }
                     }
-                    int required = (int)min(wh.filter_min, accounts.size());
+                    int required = wh.filter_min;
+                    if (required > (int)accounts.size())
+                        required = (int)accounts.size();
                     LOG_F(INFO, "Webhook (%s) - %s - Found/Required: %d/%d",
                           wh.name.c_str(), log->boss_name.c_str(), found,
                           required);
@@ -1222,10 +1342,20 @@ void Uploader::check_webhooks(int log_id) {
 void Uploader::check_gw2bot(int log_id) {
     if (!settings.gw2bot_enabled) return;
 
-    auto log = storage->get_pointer<Log>(log_id);
+    std::unique_ptr<Log> log;
+    {
+        db_lock dlk(db_mutex);
+        log = storage->get_pointer<Log>(log_id);
+    }
     if (log) {
         bool process = true;
         if (!log->success && settings.gw2bot_success_only) process = false;
+
+        std::string gw2bot_key;
+        {
+            std::lock_guard<std::mutex> ulk(ui_mutex);
+            gw2bot_key = settings.gw2bot_key;
+        }
 
         if (process) {
             LOG_F(INFO, "Posting to GW2Bot: %s", log->permalink.c_str());
@@ -1248,7 +1378,7 @@ void Uploader::check_gw2bot(int log_id) {
                     }
                     LOG_F(INFO, "GW2Bot response: %s", response.text.c_str());
                 },
-                settings.gw2bot_key, *log);
+                gw2bot_key, *log);
         }
     }
 }
@@ -1256,17 +1386,27 @@ void Uploader::check_gw2bot(int log_id) {
 void Uploader::check_aleeva(int log_id) {
     if (!settings.aleeva.enabled) return;
 
-    auto log = storage->get_pointer<Log>(log_id);
+    std::unique_ptr<Log> log;
+    {
+        db_lock dlk(db_mutex);
+        log = storage->get_pointer<Log>(log_id);
+    }
     if (log) {
         bool process = true;
         if (!log->success && settings.gw2bot_success_only) process = false;
+
+        decltype(settings.aleeva) aleeva_snapshot;
+        {
+            std::lock_guard<std::mutex> ulk(ui_mutex);
+            aleeva_snapshot = settings.aleeva;
+        }
 
         if (process) {
             LOG_F(INFO, "Posting to Aleeva: %s", log->permalink.c_str());
             auto aleeva_future = std::async(
                 std::launch::async,
                 Aleeva::post_log,
-                settings.aleeva, log->permalink);
+                aleeva_snapshot, log->permalink);
         }
     }
 }
@@ -1276,52 +1416,83 @@ void Uploader::start_async_refresh_log_list() {
     using namespace sqlite_orm;
     // Early out if we are already waiting on a refresh
     if (ft_file_list.valid()) return;
-    if (!std::filesystem::exists(log_path)) return;
+    std::error_code ec;
+    if (!std::filesystem::exists(log_path, ec) || ec) return;
 
     ft_file_list = std::async(
         std::launch::async,
-        [&](fs::path path) {
+        [this](fs::path path) {
             std::vector<Log> file_list;
-            auto filenames = storage->select(&Log::filename);
-            std::set<std::string> filename_set(filenames.begin(),
-                                               filenames.end());
+            // Runs on a worker thread; its result is rethrown by .get() on the
+            // imgui thread. Nothing may escape: catch everything and return
+            // whatever we have.
+            try {
+                std::set<std::string> filename_set;
+                {
+                    db_lock dlk(db_mutex);
+                    auto filenames = storage->select(&Log::filename);
+                    filename_set.insert(filenames.begin(), filenames.end());
+                }
 
-            storage->begin_transaction();
-            for (const auto& p : fs::recursive_directory_iterator(path)) {
-                if (fs::is_regular_file(p.status())) {
-                    const auto& extension = p.path().extension();
-                    auto& fn = p.path()
-                                   .filename()
-                                   .replace_extension()
-                                   .replace_extension()
-                                   .string();
-                    if (extension != ".zevtc" && extension != ".evtc") continue;
-                    if (filename_set.count(fn) == 0) {
+                // 1) Walk the log tree WITHOUT holding the db lock. The
+                // error_code iterator skips entries it can't read (permissions,
+                // a dir that vanishes mid-scan) instead of throwing.
+                std::vector<Log> new_logs;
+                std::error_code ec;
+                fs::recursive_directory_iterator it(path, ec), end;
+                for (; it != end; it.increment(ec)) {
+                    if (ec) {
+                        ec.clear();
+                        continue;
+                    }
+                    try {
+                        const fs::directory_entry& p = *it;
+                        std::error_code fec;
+                        if (!fs::is_regular_file(p.status(fec)) || fec) continue;
+                        std::string extension = p.path().extension().string();
+                        if (extension != ".zevtc" && extension != ".evtc")
+                            continue;
+                        std::string fn = p.path()
+                                             .filename()
+                                             .replace_extension()
+                                             .replace_extension()
+                                             .string();
+                        if (filename_set.count(fn) != 0) continue;
+
                         LOG_F(INFO, "Found new log: %s",
                               p.path().string().c_str());
                         Log log;
                         log.id = -1;
-                        log.path = p;
+                        log.path = p.path();
                         log.filename = fn;
-                        // get_time needs separators to parse
-                        auto temp = log.filename;
-                        temp.insert(4, "-");
-                        temp.insert(7, "-");
-                        temp.insert(13, "-");
-                        temp.insert(16, "-");
+
+                        // Parse the timestamp from the arcdps filename
+                        // (YYYYMMDD-HHMMSS). A non-standard name just yields no
+                        // parsed time -- never a crash.
                         std::tm tm = {};
-                        std::stringstream ss(temp);
-                        ss >> std::get_time(&tm, "%Y-%m-%d-%H-%M-%S");
-                        if (ss.fail()) {
-                            LOG_F(INFO, "Failed to parse time.");
+                        if (fn.size() >= 15) {
+                            std::string temp = fn;
+                            try {
+                                temp.insert(4, "-");
+                                temp.insert(7, "-");
+                                temp.insert(13, "-");
+                                temp.insert(16, "-");
+                                std::stringstream ss(temp);
+                                ss >> std::get_time(&tm,
+                                                    "%Y-%m-%d-%H-%M-%S");
+                            } catch (...) {
+                                tm = {};
+                            }
                         }
                         tm.tm_isdst = -1;
                         log.time = std::chrono::system_clock::from_time_t(
                             std::mktime(&tm));
 
                         char timestr[64];
-                        std::strftime(timestr, sizeof timestr,
-                                      "%I:%M%p (%a %b %d)", &tm);
+                        if (std::strftime(timestr, sizeof timestr,
+                                          "%I:%M%p (%a %b %d)", &tm) == 0) {
+                            timestr[0] = '\0';
+                        }
                         log.human_time = std::string(timestr);
 
                         log.uploaded = false;
@@ -1332,27 +1503,40 @@ void Uploader::start_async_refresh_log_list() {
                         log.json_available = false;
                         log.success = false;
 
-                        try {
-                            log.id = storage->insert(log);
-                        } catch (std::system_error e) {
-                            LOG_F(ERROR, "Sqlite insert error: %s", e.what());
-                        } catch (...) {
-                            LOG_F(ERROR, "Unknown Sqlite insert error.");
-                        }
+                        new_logs.push_back(std::move(log));
+                    } catch (const std::exception& e) {
+                        LOG_F(ERROR, "Skipping unreadable log entry: %s",
+                              e.what());
                     }
                 }
+
+                // 2) Insert the new logs in one transaction, under the lock.
+                {
+                    db_lock dlk(db_mutex);
+                    storage->begin_transaction();
+                    for (auto& log : new_logs) {
+                        try {
+                            log.id = storage->insert(log);
+                        } catch (const std::exception& e) {
+                            LOG_F(ERROR, "Sqlite insert error: %s", e.what());
+                        }
+                    }
+                    storage->commit();
+
+                    file_list = storage->get_all<Log>(
+                        order_by(&Log::time).desc(), limit(kMaxLogs));
+                }
+
+                std::vector<int> queue;
+                for (auto& log : file_list) {
+                    if (!log.uploaded) queue.push_back(log.id);
+                }
+                add_pending_upload_logs(queue);
+            } catch (const std::exception& e) {
+                LOG_F(ERROR, "Log refresh failed: %s", e.what());
+            } catch (...) {
+                LOG_F(ERROR, "Log refresh failed: unknown exception");
             }
-            storage->commit();
-
-            file_list =
-                storage->get_all<Log>(order_by(&Log::time).desc(), limit(75));
-
-            std::vector<int> queue;
-            for (auto& log : file_list) {
-                if (!log.uploaded) queue.push_back(log.id);
-            }
-            add_pending_upload_logs(queue);
-
             return file_list;
         },
         log_path);
@@ -1363,7 +1547,13 @@ void Uploader::poll_async_refresh_log_list() {
     if (ft_file_list.valid()) {
         if (ft_file_list.wait_for(std::chrono::milliseconds(1)) ==
             std::future_status::ready) {
-            logs = ft_file_list.get();
+            // The lambda already swallows its own errors, but .get() can still
+            // rethrow (e.g. a stored bad_alloc); never let it cross into arcdps.
+            try {
+                logs = ft_file_list.get();
+            } catch (const std::exception& e) {
+                LOG_F(ERROR, "Log refresh result failed: %s", e.what());
+            }
         }
     }
 
@@ -1388,14 +1578,21 @@ void Uploader::start_upload_thread() {
     // Aleeva Authorise
     if (settings.aleeva.enabled) {
         auto future =
-            std::async(std::launch::async, [&]() {
-				StatusMessage sm;
-                sm.msg = "Aleeva login failed. Please check your access code and try to login again.";
-                if (Aleeva::login(settings)) {
-                    sm.msg = "Aleeva login successful.";
-				}
-				status_messages.push_back(sm);
-			});
+            std::async(std::launch::async, [this]() {
+                std::string msg =
+                    "Aleeva login failed. Please check your access code and try "
+                    "to login again.";
+                try {
+                    if (Aleeva::login(settings)) {
+                        msg = "Aleeva login successful.";
+                    }
+                } catch (...) {
+                    // Aleeva::login swallows its own errors; belt-and-suspenders
+                }
+                // Post via the thread-safe queue, never straight into
+                // status_messages (which the imgui thread iterates).
+                queue_status_message(msg);
+            });
     }
 }
 
@@ -1416,7 +1613,13 @@ void Uploader::add_pending_upload_logs(std::vector<int>& queue) {
 void Uploader::upload_thread_loop() {
     while (upload_thread_run) {
         std::unique_lock<std::mutex> lk(ut_mutex);
-        ut_cv.wait(lk);
+        // Predicate guards against the lost-wakeup race: if shutdown sets the
+        // flag and notifies between our flag check and here, the predicate sees
+        // it and we don't block forever (which would hang the game on exit).
+        ut_cv.wait(lk, [this] {
+            return !upload_queue.empty() || !upload_thread_run;
+        });
+        if (!upload_thread_run) break;
 
         bool process_log = false;
         int log_id;
@@ -1429,103 +1632,148 @@ void Uploader::upload_thread_loop() {
         lk.unlock();
 
         if (process_log) {
-            std::string display;
-            auto log = storage->get_pointer<Log>(log_id);
-            if (!log) continue;
-
-            display = log->filename;
-
-            queue_status_message("Uploading " + display + " - " +
-                                 log->human_time + ".");
-
-            cpr::Response response;
-            cpr::Url url = cpr::Url{"https://dps.report/uploadContent"};
-            cpr::Parameters params = cpr::Parameters{};
-            cpr::Multipart multi = cpr::Multipart{
-                {"file", cpr::File{log->path.string()}}, {"json", "1"}};
-
-            if (!userToken.disabled) {
-                params.Add({"userToken", userToken.value});
-            }
-
-            if (settings.wvw_detailed_enabled) {
-                params.Add({"detailedwvw", "true"});
-            }
-
-            response = cpr::Post(url, params, multi);
-
-            StatusMessage status;
-            status.log_id = -1;
-            if (response.status_code == 200) {
-                json parsed = json::parse(response.text);
-
-                log->uploaded = true;
-                log->report_id = parsed["id"].get<std::string>();
-                log->permalink = parsed["permalink"].get<std::string>();
-                json encounter = parsed["encounter"];
-                log->boss_id = encounter["bossId"].get<int>();
-                log->boss_name = encounter["boss"].get<std::string>();
-                log->players_json = parsed["players"].dump();
-                log->json_available = encounter["jsonAvailable"].get<bool>();
-                log->success = encounter["success"].get<bool>();
-                auto token = parsed["userToken"].get<std::string>();
-
-                status.msg =
-                    "Uploaded " + display + " - " + log->human_time + ".";
-                status.log_id = log->id;
-
-                if (!userToken.disabled) {
-                    if (userToken.value.empty() &&
-                        token.size() <= sizeof(userToken.value_buf)) {
-                        memset(userToken.value_buf, 0,
-                               sizeof(userToken.value_buf));
-                        memcpy(userToken.value_buf, token.c_str(),
-                               token.size());
-                        userToken.value = userToken.value_buf;
-                        storage->update(userToken);
-                    } else if (token != userToken.value) {
-                        status.msg =
-                            "ERROR: Configured userToken did not work. Maybe a "
-                            "wrong token "
-                            "was used?";
-                    }
-                }
-            } else if (response.status_code == 401) {
-                status.msg =
-                    "Upload failed. Invalid Username/Password. Please login "
-                    "again.";
-            } else if (response.status_code == 400) {
-                status.msg =
-                    "Upload failed. Invalid File/File Error or Connection "
-                    "Error.";
-            } else {
-                status.msg = "Unknown response.\n" + response.text;
-                LOG_F(INFO, "Upload failed: %s - %d, %s, %s", log->filename,
-                      response.status_code, response.error.message,
-                      response.text);
-                log->uploaded = true;
-                log->error = true;
-            }
-
+            // This runs on a raw std::thread: any exception escaping this
+            // body calls std::terminate and crashes the game (0xc0000409).
+            // Everything is wrapped, and on failure the log is marked
+            // uploaded+error so the auto-queue does not retry (and re-crash)
+            // it on every launch.
             try {
-                storage->update(*log);
-                if (log->uploaded && !log->error) {
-                    check_webhooks(log->id);
-                    check_gw2bot(log->id);
-                    check_aleeva(log->id);
-                    check_wingman(*log);
-                };
-            } catch (std::system_error e) {
-                LOG_F(ERROR, "Failed to update log: %s", e.what());
-            }
+                std::string display;
+                std::unique_ptr<Log> log;
+                {
+                    db_lock dlk(db_mutex);
+                    log = storage->get_pointer<Log>(log_id);
+                }
+                if (!log) continue;
 
-            queue_status_message(status);
+                display = log->filename;
+
+                queue_status_message("Uploading " + display + " - " +
+                                     log->human_time + ".");
+
+                // Snapshot UI-owned state under lock: a concurrent options
+                // edit on the imgui thread could otherwise reallocate these
+                // strings mid-read (torn read -> 0xc0000005).
+                bool token_disabled;
+                std::string token_value;
+                bool wvw_detailed;
+                {
+                    std::lock_guard<std::mutex> ulk(ui_mutex);
+                    token_disabled = userToken.disabled;
+                    token_value = userToken.value;
+                    wvw_detailed = settings.wvw_detailed_enabled;
+                }
+
+                cpr::Url url = cpr::Url{"https://dps.report/uploadContent"};
+                cpr::Parameters params = cpr::Parameters{};
+                cpr::Multipart multi = cpr::Multipart{
+                    {"file", cpr::File{log->path.string()}}, {"json", "1"}};
+
+                if (!token_disabled) {
+                    params.Add({"userToken", token_value});
+                }
+
+                if (wvw_detailed) {
+                    params.Add({"detailedwvw", "true"});
+                }
+
+                cpr::Response response = cpr::Post(url, params, multi);
+
+                StatusMessage status;
+                status.log_id = -1;
+                if (response.status_code == 200) {
+                    // A 200 does not guarantee a JSON body of the expected
+                    // shape (rate-limit/HTML/error payloads happen). The parse
+                    // is fully exception-safe and returns false for anything
+                    // unusable -- this is the guard against the upload thread
+                    // terminating (0xc0000409) on a bad server response.
+                    std::string token;
+                    bool usable =
+                        parse_dpsreport_response(response.text, *log, token);
+                    log->uploaded = true;
+
+                    if (!usable) {
+                        // 200 but not a usable response -> mark error so we
+                        // don't present a dead button or retry (re-crash) it.
+                        log->error = true;
+                        status.msg = "Upload response was not usable for " +
+                                     display + ".";
+                    } else {
+                        status.msg =
+                            "Uploaded " + display + " - " + log->human_time + ".";
+                        status.log_id = log->id;
+                    }
+
+                    if (!token_disabled && !token.empty()) {
+                        std::lock_guard<std::mutex> ulk(ui_mutex);
+                        if (userToken.value.empty()) {
+                            safe_copy(userToken.value_buf, token);
+                            userToken.value = userToken.value_buf;
+                            db_lock dlk(db_mutex);
+                            storage->update(userToken);
+                        } else if (token != userToken.value) {
+                            status.msg =
+                                "ERROR: Configured userToken did not work. "
+                                "Maybe a wrong token was used?";
+                        }
+                    }
+                } else if (response.status_code == 401) {
+                    status.msg =
+                        "Upload failed. Invalid Username/Password. Please login "
+                        "again.";
+                } else if (response.status_code == 400) {
+                    status.msg =
+                        "Upload failed. Invalid File/File Error or Connection "
+                        "Error.";
+                } else {
+                    status.msg = "Upload failed (HTTP " +
+                                 std::to_string(response.status_code) + ").";
+                    LOG_F(INFO, "Upload failed: %s - %ld, %s",
+                          log->filename.c_str(), response.status_code,
+                          response.error.message.c_str());
+                    log->uploaded = true;
+                    log->error = true;
+                }
+
+                try {
+                    {
+                        db_lock dlk(db_mutex);
+                        storage->update(*log);
+                    }
+                    if (log->uploaded && !log->error) {
+                        check_webhooks(log->id);
+                        check_gw2bot(log->id);
+                        check_aleeva(log->id);
+                        check_wingman(*log);
+                    };
+                } catch (const std::exception& e) {
+                    LOG_F(ERROR, "Post-upload processing failed: %s", e.what());
+                }
+
+                queue_status_message(status);
+            } catch (const std::exception& e) {
+                LOG_F(ERROR, "Upload processing failed for log %d: %s", log_id,
+                      e.what());
+                mark_log_errored(log_id);
+                queue_status_message(
+                    "Upload failed (unexpected server response); skipped.");
+            } catch (...) {
+                LOG_F(ERROR, "Upload processing failed for log %d (unknown)",
+                      log_id);
+                mark_log_errored(log_id);
+                queue_status_message("Upload failed (unknown error); skipped.");
+            }
         }
     }
 }
 
 void Uploader::check_wingman(Log& log) {
-    if (!settings.wingman_enabled) return;
+    std::string account;
+    {
+        std::lock_guard<std::mutex> ulk(ui_mutex);
+        if (!settings.wingman_enabled) return;
+        account = settings.wingman_account;
+    }
     if (log.boss_id == 1) return;  // Wingman does not accept WvW logs
     std::error_code ec;
     auto size = fs::file_size(log.path, ec);
@@ -1533,19 +1781,18 @@ void Uploader::check_wingman(Log& log) {
         queue_status_message("Wingman: log file missing for " + log.filename);
         return;
     }
-    auto [ok, msg] = Wingman::upload_evtc(
-        log.path.string(), (long long)size, log.boss_id,
-        settings.wingman_account);
+    auto [ok, msg] = Wingman::upload_evtc(log.path.string(), (long long)size,
+                                          log.boss_id, account);
     if (ok) {
         // Wingman knows the upload by the evtc's actual file name
         // (with extension), not our extension-less display name.
         log.wingman_link = Wingman::fetch_log_link(
-            log.path.filename().string(), (long long)size, log.boss_id,
-            settings.wingman_account);
+            log.path.filename().string(), (long long)size, log.boss_id, account);
         if (!log.wingman_link.empty()) {
             try {
+                db_lock dlk(db_mutex);
                 storage->update(log);
-            } catch (std::system_error& e) {
+            } catch (const std::exception& e) {
                 LOG_F(ERROR, "Failed to store wingman link: %s", e.what());
             }
         }
@@ -1561,6 +1808,20 @@ void Uploader::queue_status_message(const std::string& msg, int log_id) {
 void Uploader::queue_status_message(const StatusMessage& msg) {
     std::lock_guard<std::mutex> lk(ts_msg_mutex);
     thread_status_messages.push_back(msg);
+}
+
+void Uploader::mark_log_errored(int log_id) {
+    try {
+        db_lock lk(db_mutex);
+        auto lg = storage->get_pointer<Log>(log_id);
+        if (lg) {
+            lg->uploaded = true;
+            lg->error = true;
+            storage->update(*lg);
+        }
+    } catch (...) {
+        // best-effort; never throw out of the upload thread's error handler
+    }
 }
 
 std::string Uploader::format_msg(Log log) {

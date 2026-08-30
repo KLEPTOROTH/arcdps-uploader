@@ -16,6 +16,15 @@ Grab the latest [release](https://github.com/KLEPTOROTH/arcdps-uploader/releases
 Use *Alt-Shift-U* to bring the uploader window up.
 
 ## Changelog
+**1.2.6**
+* Crash-hardening pass across the whole addon so a bad server response, an odd log file, a large config value, or shutdown timing can no longer take the game down:
+  * The upload thread now parses the dps.report response defensively and can never let an exception escape (an unexpected/HTML/rate-limited response used to unwind off the worker thread and crash the game at character select). Failing logs are marked so they are not retried and re-crashed on every launch.
+  * Every arcdps callback (`mod_init`, `mod_imgui`, `mod_wnd`, `mod_combat`, options) is now exception-guarded — nothing can unwind across arcdps' C ABI. A failed init disables the addon instead of crashing the game.
+  * All fixed-size buffer copies (user token, webhook name/URL/filter) are bounds-checked, so an over-long stored value can't overflow.
+  * The single SQLite connection is now serialized behind a mutex (it was used from the imgui, upload, and refresh threads at once), and the webhook list, user token, and relevant settings are synchronized across threads — fixing intermittent, machine-dependent crashes.
+  * The log-refresh walk no longer throws on an unreadable folder or an unusually named log; the upload thread shuts down cleanly (no more possible hang on exit); and webhook add/delete no longer invalidates the list mid-iteration.
+* No user-facing behavior changes — this release is entirely stability.
+
 **1.2.5**
 * Fixed a crash (Windows exception `0xc0000409`) that could take the game down at the character-select screen. Status text and log timestamps were drawn with `ImGui::Text(str.c_str())`, treating the string as a printf format; a `%` in the text — common in a raw server response body or a percent-encoded URL — was parsed as a format specifier and tripped the CRT, hard-crashing the game before any crash log was written. These are now drawn with `ImGui::TextUnformatted`. The smoke test now draws a status message full of format specifiers every frame as a regression guard.
 

@@ -213,6 +213,11 @@ uintptr_t mod_imgui(uint32_t not_charsel_or_loading) {
     return up->imgui_tick(not_charsel_or_loading);
 }
 
+/* test seam: push a status message into the live uploader (see smoketest) */
+void uploader_test_push_status(const char* msg) {
+    if (up) up->push_status_message(msg ? msg : "");
+}
+
 void mod_options_windows(char* windowname) {
 	if (!windowname) {
 		up->imgui_window_checkbox();	

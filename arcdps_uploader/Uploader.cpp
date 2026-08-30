@@ -371,7 +371,7 @@ void Uploader::imgui_draw_logs() {
         ImGui::PopID();
         ImGui::PopStyleColor();
         ImGui::NextColumn();
-        ImGui::Text(s.human_time.c_str());
+        ImGui::TextUnformatted(s.human_time.c_str());
         ImGui::NextColumn();
         if (s.uploaded) {
             ImGui::PushID(s.filename.c_str());
@@ -501,7 +501,7 @@ void Uploader::imgui_draw_status() {
     ImGui::BeginChild("Status Messages", ImVec2(450, 150), ImGuiChildFlags_Borders);
 
     for (const auto& status : status_messages) {
-        ImGui::Text(status.msg.c_str());
+        ImGui::TextUnformatted(status.msg.c_str());
         if (status.log_id > 0) {
             auto log = storage->get_pointer<Log>(status.log_id);
             if (log) {

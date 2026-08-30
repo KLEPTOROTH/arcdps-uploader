@@ -16,6 +16,9 @@ Grab the latest [release](https://github.com/KLEPTOROTH/arcdps-uploader/releases
 Use *Alt-Shift-U* to bring the uploader window up.
 
 ## Changelog
+**1.2.5**
+* Fixed a crash (Windows exception `0xc0000409`) that could take the game down at the character-select screen. Status text and log timestamps were drawn with `ImGui::Text(str.c_str())`, treating the string as a printf format; a `%` in the text — common in a raw server response body or a percent-encoded URL — was parsed as a format specifier and tripped the CRT, hard-crashing the game before any crash log was written. These are now drawn with `ImGui::TextUnformatted`. The smoke test now draws a status message full of format specifiers every frame as a regression guard.
+
 **1.2.4**
 * Shift+click selects the whole range of fights between the last clicked fight and the shift-clicked one; plain clicks still toggle fights individually
 * "Copy & Format Recent Clears" now copies today's clears by default (since local midnight); the previous minutes-back window is available via "Recent clears: today only" under Options → Other

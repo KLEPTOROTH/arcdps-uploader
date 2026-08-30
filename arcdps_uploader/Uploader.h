@@ -103,6 +103,11 @@ public:
 
 	uintptr_t imgui_tick(uint32_t not_charsel_or_loading);
 	void imgui_window_checkbox();
+
+	// Surface a status message in the uploader window. Also used by the smoke
+	// test to drive the status draw path with hostile input (the status text
+	// must never be treated as a printf format string).
+	void push_status_message(const std::string& msg) { queue_status_message(msg); }
 	
 	void start_async_refresh_log_list();
 

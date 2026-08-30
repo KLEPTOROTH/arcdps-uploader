@@ -69,6 +69,16 @@ int main() {
     mod_wnd(nullptr, WM_KEYUP, VK_SHIFT, 0);
     mod_wnd(nullptr, WM_KEYUP, VK_MENU, 0);
 
+    // Regression guard for the 0xc0000409 crash: status text (which can hold
+    // a raw server response body or a percent-encoded URL) must be drawn with
+    // ImGui::TextUnformatted, never ImGui::Text(msg.c_str()). A '%' in the
+    // message would otherwise be parsed as a printf spec -- %n/lone-% trips
+    // the CRT invalid-parameter handler and fastfails the game the moment the
+    // status window draws (i.e. at character select).
+    uploader_test_push_status(
+        "Unknown response.\n%n %s %s %s %x%x%x 100%% "
+        "http://x/%20/%ZZ trailing %");
+
     for (int n = 0; n < 120; n++) {
         ImGui_ImplNull_NewFrame();
         ImGui::NewFrame();

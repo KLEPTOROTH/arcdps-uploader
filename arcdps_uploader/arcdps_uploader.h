@@ -3,7 +3,7 @@
 #include "arcdps_defs.h"
 #include "imgui/imgui.h"
 
-#define UPLOADER_VERSION "1.2.4"
+#define UPLOADER_VERSION "1.2.5"
 
 /* proto/globals */
 extern char* arcvers;
@@ -18,3 +18,4 @@ uintptr_t mod_wnd(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 uintptr_t mod_combat(cbtevent* ev, ag* src, ag* dst, char* skillname, uint64_t id, uint64_t revision);
 uintptr_t mod_imgui(uint32_t not_charsel_or_loading);
 void mod_options_windows(char* windowname);
+void uploader_test_push_status(const char* msg);

@@ -37,7 +37,12 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: d3d9_uploader
-        path: ${{github.workspace}}/build/Release/d3d9_uploader.dll
+        # Ship the PDB alongside the DLL so crash-handler stack traces
+        # (addons/uploader/uploader_crash.log) can be symbolized to
+        # function + line against this exact build.
+        path: |
+          ${{github.workspace}}/build/Release/d3d9_uploader.dll
+          ${{github.workspace}}/build/Release/d3d9_uploader.pdb
 
     - name: Release
       if: startsWith(github.ref, 'refs/tags/')
@@ -45,4 +50,6 @@ jobs:
       with:
         draft: true
         generate_release_notes: true
-        files: ${{github.workspace}}\build\Release\d3d9_uploader.dll
+        files: |
+          ${{github.workspace}}\build\Release\d3d9_uploader.dll
+          ${{github.workspace}}\build\Release\d3d9_uploader.pdb
